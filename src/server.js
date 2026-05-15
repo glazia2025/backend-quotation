@@ -16,6 +16,7 @@ const defaultAllowedOrigins = [
   "https://glazia-quotation.vercel.app",
   "http://localhost:3000",
   "http://localhost:3001",
+  "https://splendid-begonia-cbc292.netlify.app",
 ];
 
 const allowedOrigins = new Set(
