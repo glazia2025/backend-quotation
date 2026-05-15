@@ -4,11 +4,11 @@ const cuttingScheduleLineSchema = new mongoose.Schema(
   {
     itemType: {
       type: String,
-      enum: ["profile", "hardware"],
+      enum: ["profile", "hardware", "glass"],
       required: true,
       default: "profile",
     },
-    sapCode: { type: String, required: true, trim: true },
+    sapCode: { type: String, trim: true, default: "" },
     description: { type: String, trim: true, default: "" },
     quantityFormula: { type: String, required: true, trim: true, default: "1" },
     dimensionFormula: { type: String, trim: true, default: "" },
@@ -40,6 +40,13 @@ const cuttingScheduleConfigSchema = new mongoose.Schema(
     series: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
     lines: [cuttingScheduleLineSchema],
+    glassBeadingLinks: [
+      {
+        glassSpec: { type: String, required: true, trim: true },
+        beadingSapCode: { type: String, trim: true, default: "" },
+        beadingDescription: { type: String, trim: true, default: "" },
+      },
+    ],
     schedules: [cuttingScheduleVariantSchema],
     defaultScheduleKey: {
       type: String,

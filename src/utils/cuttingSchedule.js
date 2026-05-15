@@ -93,9 +93,17 @@ const findHardwareBySapCode = async (sapCode) => {
     : null;
 };
 
+const findGlassByName = (glassSpec) => {
+  const label = String(glassSpec || "").trim();
+  return label ? { label } : null;
+};
+
 const resolveCatalogProduct = async (line) => {
   if (line.itemType === "hardware") {
     return findHardwareBySapCode(line.sapCode);
+  }
+  if (line.itemType === "glass") {
+    return findGlassByName(line.description || line.sapCode);
   }
 
   return findProfileProductBySapCode(line.sapCode);
@@ -161,9 +169,42 @@ const searchCatalogProducts = async ({ itemType, sapCode, limit = 10 }) => {
   return searchProfileProductsBySapCode(sapCode, limit);
 };
 
+const listProfileProducts = async () => {
+  const profileOptions = await ProfileOptions.findOne({}).lean();
+  const categories = profileOptions?.categories || {};
+  const categoryEntries =
+    categories instanceof Map ? Array.from(categories.entries()) : Object.entries(categories);
+  const products = [];
+
+  for (const [categoryName, categoryValue] of categoryEntries) {
+    const productsMap = categoryValue?.products || {};
+    const productEntries =
+      productsMap instanceof Map ? Array.from(productsMap.entries()) : Object.entries(productsMap);
+
+    for (const [optionName, optionProducts] of productEntries) {
+      for (const product of Array.isArray(optionProducts) ? optionProducts : []) {
+        products.push({
+          ...product,
+          itemType: "profile",
+          catalogCategory: categoryName,
+          catalogOption: optionName,
+          label: product.description || product.part || product.sapCode,
+        });
+      }
+    }
+  }
+
+  return products.sort((a, b) =>
+    `${a.catalogCategory} ${a.catalogOption} ${a.label}`.localeCompare(
+      `${b.catalogCategory} ${b.catalogOption} ${b.label}`
+    )
+  );
+};
+
 module.exports = {
   escapeHtml,
   evaluateFormula,
+  listProfileProducts,
   resolveCatalogProduct,
   round3,
   searchCatalogProducts,

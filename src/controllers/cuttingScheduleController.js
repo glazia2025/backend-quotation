@@ -7,6 +7,7 @@ const { closePdfBrowser, launchPdfBrowser } = require("../utils/pdfBrowser");
 const {
   escapeHtml,
   evaluateFormula,
+  listProfileProducts,
   resolveCatalogProduct,
   round3,
   searchCatalogProducts,
@@ -55,13 +56,14 @@ const getDescriptionCatalog = async (_req, res) => {
         const systemType = seriesItem.system?.name || "";
         const key = `${systemType}||${seriesItem.name}||${description.name}`;
         const config = configMap[key];
+        const lineCount = getConfiguredLineCount(config);
         return {
           systemType,
           series: seriesItem.name,
           description: description.name,
           configId: config?._id,
-          lineCount: getConfiguredLineCount(config),
-          configured: Boolean(config),
+          lineCount,
+          configured: lineCount > 0,
         };
       })
     );
@@ -96,21 +98,36 @@ const getConfig = async (req, res) => {
   }
 };
 
-const normalizeLine = (line = {}, index = 0) => ({
-  itemType: line.itemType === "hardware" ? "hardware" : "profile",
-  sapCode: String(line.sapCode || "").trim(),
-  description: String(line.description || "").trim(),
-  quantityFormula: String(line.quantityFormula || "1").trim(),
-  dimensionFormula:
-    line.itemType === "hardware" ? "" : String(line.dimensionFormula || "").trim(),
-  cutAngle:
-    line.itemType === "hardware"
-      ? ""
-      : String(line.cutAngle || line.cutAngleLeft || line.cutAngleRight || "").trim(),
-  position: String(line.position || "").trim(),
-  unit: String(line.unit || "Pcs").trim(),
-  sortOrder: Number.isFinite(Number(line.sortOrder)) ? Number(line.sortOrder) : index,
-});
+const normalizeLineType = (value) =>
+  value === "hardware" || value === "glass" ? value : "profile";
+
+const normalizeLine = (line = {}, index = 0) => {
+  const itemType = normalizeLineType(line.itemType);
+  return {
+    itemType,
+    sapCode: String(line.sapCode || "").trim(),
+    description: String(line.description || "").trim(),
+    quantityFormula: String(line.quantityFormula || "1").trim(),
+    dimensionFormula:
+      itemType === "hardware" ? "" : String(line.dimensionFormula || "").trim(),
+    cutAngle:
+      itemType === "hardware" || itemType === "glass"
+        ? ""
+        : String(line.cutAngle || line.cutAngleLeft || line.cutAngleRight || "").trim(),
+    position: String(line.position || "").trim(),
+    unit: String(line.unit || (itemType === "glass" ? "Sqft" : "Pcs")).trim(),
+    sortOrder: Number.isFinite(Number(line.sortOrder)) ? Number(line.sortOrder) : index,
+  };
+};
+
+const normalizeGlassBeadingLinks = (links = []) =>
+  (Array.isArray(links) ? links : [])
+    .map((link) => ({
+      glassSpec: String(link.glassSpec || "").trim(),
+      beadingSapCode: String(link.beadingSapCode || "").trim(),
+      beadingDescription: String(link.beadingDescription || "").trim(),
+    }))
+    .filter((link) => link.glassSpec);
 
 const normalizeSchedules = (schedules = [], legacyLines = []) => {
   const byKey = new Map(
@@ -180,6 +197,7 @@ const upsertConfig = async (req, res) => {
       notes: String(req.body.notes || "").trim(),
       lines: schedules.find((schedule) => schedule.key === "90_90")?.lines || [],
       schedules,
+      glassBeadingLinks: normalizeGlassBeadingLinks(req.body.glassBeadingLinks),
       defaultScheduleKey: isCuttingScheduleKey(req.body.defaultScheduleKey)
         ? req.body.defaultScheduleKey
         : "90_90",
@@ -189,8 +207,38 @@ const upsertConfig = async (req, res) => {
       return res.status(400).json({ message: "systemType, series and description are required" });
     }
 
-    if (payload.schedules.some((schedule) => schedule.lines.some((line) => !line.sapCode))) {
-      return res.status(400).json({ message: "Every cutting schedule line needs a SAP code" });
+    if (
+      payload.schedules.some((schedule) =>
+        schedule.lines.some((line) => line.itemType !== "glass" && !line.sapCode)
+      )
+    ) {
+      return res.status(400).json({ message: "Every profile and hardware line needs a SAP code" });
+    }
+
+    if (
+      payload.schedules.some(
+        (schedule) => schedule.lines.filter((line) => line.itemType === "glass").length > 1
+      )
+    ) {
+      return res.status(400).json({ message: "Each cutting schedule can have only one glass line" });
+    }
+
+    if (
+      payload.schedules.some(
+        (schedule) =>
+          schedule.lines.length > 0 &&
+          schedule.lines.filter((line) => line.itemType === "glass").length !== 1
+      )
+    ) {
+      return res.status(400).json({ message: "Each configured cutting schedule needs exactly one glass line" });
+    }
+
+    if (
+      payload.schedules.some((schedule) =>
+        schedule.lines.some((line) => line.itemType === "glass" && !line.dimensionFormula)
+      )
+    ) {
+      return res.status(400).json({ message: "Glass lines need a dimension formula" });
     }
 
     const config = await CuttingScheduleConfig.findOneAndUpdate(
@@ -232,6 +280,16 @@ const searchCatalog = async (req, res) => {
   } catch (error) {
     console.error("searchCatalog error", error);
     res.status(500).json({ message: "Unable to search SAP code" });
+  }
+};
+
+const getBeadingCatalog = async (_req, res) => {
+  try {
+    const products = await listProfileProducts();
+    res.json({ products });
+  } catch (error) {
+    console.error("getBeadingCatalog error", error);
+    res.status(500).json({ message: "Unable to fetch beading catalog" });
   }
 };
 
@@ -277,25 +335,35 @@ const buildScheduleData = async (quotation) => {
       AREA: toNumber(item.area),
     };
     const rows = [];
+    const beadingMap = (config?.glassBeadingLinks || []).reduce((acc, link) => {
+      acc[String(link.glassSpec || "").trim()] = link;
+      return acc;
+    }, {});
 
     for (const line of schedule?.lines || []) {
       const catalogProduct = await resolveCatalogProduct(line);
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
       const dimension =
-        line.itemType === "profile" && line.dimensionFormula
+        (line.itemType === "profile" || line.itemType === "glass") && line.dimensionFormula
           ? evaluateFormula(line.dimensionFormula, variables)
           : "";
+      const glassSpec = String(item.glassSpec || "").trim();
+      const linkedBeading = line.itemType === "glass" && glassSpec ? beadingMap[glassSpec] : null;
 
       rows.push({
         itemType: line.itemType,
-        description: line.description || catalogProduct?.label || line.sapCode,
-        sapCode: line.sapCode,
+        description:
+          line.itemType === "glass"
+            ? line.description || glassSpec || catalogProduct?.label || "Glass"
+            : line.description || catalogProduct?.label || line.sapCode,
+        sapCode: line.itemType === "glass" ? glassSpec : line.sapCode,
         dimension,
         cutAngle: line.cutAngle || line.cutAngleLeft || line.cutAngleRight || "",
         quantity: qty,
         unit: line.unit || "Pcs",
         position: line.position || "",
         sortOrder: line.sortOrder || 0,
+        linkedBeading,
       });
     }
 
@@ -328,8 +396,12 @@ const renderRows = (rows) =>
     .map(
       (row) => `
         <tr>
-          <td>${escapeHtml(row.itemType === "profile" ? "Profile" : "Fabrication Hardware")}</td>
-          <td>${escapeHtml(row.description)}</td>
+          <td>${escapeHtml(row.itemType === "profile" ? "Profile" : row.itemType === "glass" ? "Glass" : "Fabrication Hardware")}</td>
+          <td>${escapeHtml(
+            row.itemType === "glass" && row.linkedBeading?.beadingSapCode
+              ? `${row.description} / Beading: ${row.linkedBeading.beadingDescription || row.linkedBeading.beadingSapCode}`
+              : row.description
+          )}</td>
           <td>${escapeHtml(row.sapCode)}</td>
           <td class="num">${row.dimension === "" ? "" : escapeHtml(round3(row.dimension))}</td>
           <td class="num">${escapeHtml(row.cutAngle)}</td>
@@ -502,6 +574,7 @@ const generateCuttingSchedulePdf = async (req, res) => {
 
 module.exports = {
   deleteConfig,
+  getBeadingCatalog,
   generateCuttingSchedulePdf,
   getConfig,
   getDescriptionCatalog,

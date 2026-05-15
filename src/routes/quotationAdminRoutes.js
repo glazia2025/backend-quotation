@@ -37,6 +37,7 @@ const {
 } = require("../controllers/quotationAdminController");
 const {
   deleteConfig: deleteCuttingScheduleConfig,
+  getBeadingCatalog,
   getConfig: getCuttingScheduleConfig,
   getDescriptionCatalog: getCuttingScheduleDescriptionCatalog,
   listConfigs: listCuttingScheduleConfigs,
@@ -93,6 +94,7 @@ router.get("/cutting-schedule/configs/:id", isAdmin, getCuttingScheduleConfig);
 router.post("/cutting-schedule/configs", isAdmin, upsertCuttingScheduleConfig);
 router.delete("/cutting-schedule/configs/:id", isAdmin, deleteCuttingScheduleConfig);
 router.get("/cutting-schedule/catalog", isAdmin, searchCuttingScheduleCatalog);
+router.get("/cutting-schedule/beading-catalog", isAdmin, getBeadingCatalog);
 
 router.get(
   "/",
