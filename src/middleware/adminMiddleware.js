@@ -1,5 +1,5 @@
-const jwt = require('jsonwebtoken');
 const { extractAuthToken } = require('../utils/authCookies');
+const { verifyJwt } = require('../utils/jwt');
 require('dotenv').config();
 
 const isAdmin = (req, res, next) => {
@@ -11,7 +11,7 @@ const isAdmin = (req, res, next) => {
 
   try {
     // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyJwt(token);
 
     // Check if the user is admin
     if (decoded.role !== 'admin') {

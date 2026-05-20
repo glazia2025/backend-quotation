@@ -10,8 +10,8 @@ const HandleRule = require("../models/Quotation/HandleRule");
 const HandleOption = require("../models/Quotation/HandleOption");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const UserDescriptionRate = require("../models/Quotation/UserDescriptionRate");
-const jwt = require("jsonwebtoken");
 const { extractAuthToken } = require("../utils/authCookies");
+const { verifyJwt } = require("../utils/jwt");
 const { closePdfBrowser, launchPdfBrowser } = require("../utils/pdfBrowser");
 const { colorMapToArray } = require("../utils/handleOptionUtils");
 
@@ -51,7 +51,7 @@ const getOptionalUserId = (req) => {
   try {
     const token = extractAuthToken(req);
     if (!token) return null;
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secret");
+    const decoded = verifyJwt(token);
     return decoded?.userId || null;
   } catch (_error) {
     return null;

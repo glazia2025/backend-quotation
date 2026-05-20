@@ -1,5 +1,5 @@
-const jwt = require('jsonwebtoken');
 const { extractAuthToken } = require('../utils/authCookies');
+const { verifyJwt } = require('../utils/jwt');
 require('dotenv').config();
 
 const isUser = (req, res, next) => {
@@ -12,7 +12,7 @@ const isUser = (req, res, next) => {
   try {
     console.log( "token", token);
     // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyJwt(token);
 
     console.log(decoded);
 

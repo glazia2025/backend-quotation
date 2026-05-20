@@ -21,6 +21,12 @@ const round3 = (value) => {
 
 const normalizeCode = (value) => String(value || "").trim().toUpperCase();
 
+const getMapValue = (mapLike, key) => {
+  if (!mapLike || !key) return undefined;
+  if (mapLike instanceof Map) return mapLike.get(key);
+  return mapLike[key];
+};
+
 const evaluateFormula = (formula, variables) => {
   const source = String(formula || "").trim();
   if (!source) return "";
@@ -64,8 +70,10 @@ const findProfileProductBySapCode = async (sapCode) => {
         (product) => normalizeCode(product.sapCode) === wanted
       );
       if (match) {
+        const rate = toNumber(getMapValue(categoryValue?.rate || {}, optionName));
         return {
           ...match,
+          rate,
           catalogCategory: categoryName,
           catalogOption: optionName,
           label: match.description || match.part || match.sapCode,
@@ -127,8 +135,10 @@ const searchProfileProductsBySapCode = async (sapCode, limit = 10) => {
     for (const [optionName, products] of productEntries) {
       for (const product of Array.isArray(products) ? products : []) {
         if (normalizeCode(product.sapCode).includes(wanted)) {
+          const rate = toNumber(getMapValue(categoryValue?.rate || {}, optionName));
           matches.push({
             ...product,
+            rate,
             itemType: "profile",
             catalogCategory: categoryName,
             catalogOption: optionName,
@@ -183,8 +193,10 @@ const listProfileProducts = async () => {
 
     for (const [optionName, optionProducts] of productEntries) {
       for (const product of Array.isArray(optionProducts) ? optionProducts : []) {
+        const rate = toNumber(getMapValue(categoryValue?.rate || {}, optionName));
         products.push({
           ...product,
+          rate,
           itemType: "profile",
           catalogCategory: categoryName,
           catalogOption: optionName,
