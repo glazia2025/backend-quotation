@@ -13,6 +13,8 @@ const STALE_TEMP_PREFIXES = [
   "org.chromium.Chromium.",
 ];
 const STALE_TEMP_MAX_AGE_MS = Number(process.env.PDF_STALE_TEMP_MAX_AGE_MS || 60 * 60 * 1000);
+const BROWSER_CLOSE_TIMEOUT_MS = Number(process.env.PDF_BROWSER_CLOSE_TIMEOUT_MS || 5000);
+const TEMP_RM_RETRIES = Number(process.env.PDF_TEMP_RM_RETRIES || 3);
 
 const PDF_BROWSER_ARGS = [
   "--no-sandbox",
@@ -52,7 +54,22 @@ const assertTempSpaceAvailable = () => {
   }
 };
 
-const cleanupStalePdfTempDirs = () => {
+const rmTempPath = (targetPath) => {
+  if (!targetPath) return;
+
+  for (let attempt = 0; attempt < TEMP_RM_RETRIES; attempt += 1) {
+    try {
+      fs.rmSync(targetPath, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+      return;
+    } catch (error) {
+      if (attempt === TEMP_RM_RETRIES - 1) {
+        console.warn(`Failed to remove PDF temp path ${targetPath}:`, error.message);
+      }
+    }
+  }
+};
+
+const cleanupStalePdfTempDirs = (maxAgeMs = STALE_TEMP_MAX_AGE_MS) => {
   fs.mkdirSync(PDF_TEMP_DIR, { recursive: true });
 
   const now = Date.now();
@@ -63,8 +80,8 @@ const cleanupStalePdfTempDirs = () => {
     const fullPath = path.join(PDF_TEMP_DIR, entry.name);
     try {
       const stats = fs.statSync(fullPath);
-      if (now - stats.mtimeMs > STALE_TEMP_MAX_AGE_MS) {
-        fs.rmSync(fullPath, { recursive: true, force: true });
+      if (now - stats.mtimeMs > maxAgeMs) {
+        rmTempPath(fullPath);
       }
     } catch (error) {
       console.warn(`Failed to inspect PDF temp directory ${fullPath}:`, error.message);
@@ -94,7 +111,7 @@ const launchPdfBrowser = async () => {
 
     return { browser, userDataDir };
   } catch (error) {
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    rmTempPath(userDataDir);
     throw error;
   }
 };
@@ -104,12 +121,26 @@ const closePdfBrowser = async (handle) => {
 
   try {
     if (handle.browser) {
-      await handle.browser.close();
+      const browserProcess = handle.browser.process?.();
+      try {
+        await Promise.race([
+          handle.browser.close(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Timed out while closing PDF browser")), BROWSER_CLOSE_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (error) {
+        console.warn("PDF browser did not close cleanly:", error.message);
+        if (browserProcess && !browserProcess.killed) {
+          browserProcess.kill("SIGKILL");
+        }
+      }
     }
   } finally {
     if (handle.userDataDir) {
-      fs.rmSync(handle.userDataDir, { recursive: true, force: true });
+      rmTempPath(handle.userDataDir);
     }
+    cleanupStalePdfTempDirs();
   }
 };
 
