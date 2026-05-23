@@ -4,6 +4,7 @@ const path = require("path");
 const puppeteer = require("puppeteer");
 
 const MIN_TEMP_FREE_BYTES = Number(process.env.PDF_MIN_TEMP_FREE_BYTES || 256 * 1024 * 1024);
+//  const MIN_TEMP_FREE_BYTES= 0;
 const PDF_TEMP_DIR = process.env.PDF_TEMP_DIR || os.tmpdir();
 const STALE_TEMP_PREFIX = "glazia-pdf-chrome-";
 const STALE_TEMP_PREFIXES = [

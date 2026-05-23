@@ -13,7 +13,8 @@ const {
   getQuotationById,
   updateQuotationById,
   deleteQuotationById,
-  generateQuotationPdfController
+  generateQuotationPdfController,
+   generateElevationPdfController
 } = require("../controllers/quotationController");
 const {
   generateBomPdf,
@@ -41,6 +42,7 @@ router.get("/:id", isUser, getQuotationById);
 router.post("/:id", isUser, updateQuotationById);
 router.delete("/:id", isUser, deleteQuotationById);
 router.get("/:id/pdf", isUser, generateQuotationPdfController);
+router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
 router.get("/:id/bom", isUser, generateBomPdf);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
 module.exports = router;
