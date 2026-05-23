@@ -12,7 +12,7 @@ const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const UserDescriptionRate = require("../models/Quotation/UserDescriptionRate");
 const { extractAuthToken } = require("../utils/authCookies");
 const { verifyJwt } = require("../utils/jwt");
-const { closePdfBrowser, launchPdfBrowser } = require("../utils/pdfBrowser");
+const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
 const { colorMapToArray } = require("../utils/handleOptionUtils");
 
 const numberOr = (value, fallback = 0) => {
@@ -1749,10 +1749,7 @@ const generateQuotationPdfController = async (req, res) => {
 
     page = await browser.newPage();
 
-    await page.setContent(html, {
-      waitUntil: ["domcontentloaded", "networkidle2"],
-      timeout: 60000,
-    });
+    await setPdfContent(page, html);
 
     const pdfBuffer = await page.pdf({
       format: "A4",

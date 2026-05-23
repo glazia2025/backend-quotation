@@ -8,7 +8,7 @@ const Quotation = require("../models/Quotation/Quotation");
 const Series = require("../models/Quotation/Series");
 const User = require("../models/User");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
-const { closePdfBrowser, launchPdfBrowser } = require("../utils/pdfBrowser");
+const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
 const { restoreRateMap } = require("../utils/rateMapUtils");
 const {
   escapeHtml,
@@ -1183,10 +1183,7 @@ const generateCuttingSchedulePdf = async (req, res) => {
     browserHandle = await launchPdfBrowser();
     const { browser } = browserHandle;
     page = await browser.newPage();
-    await page.setContent(html, {
-      waitUntil: ["domcontentloaded", "networkidle2"],
-      timeout: 60000,
-    });
+    await setPdfContent(page, html);
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
@@ -1257,10 +1254,7 @@ const generateBomPdf = async (req, res) => {
     browserHandle = await launchPdfBrowser();
     const { browser } = browserHandle;
     page = await browser.newPage();
-    await page.setContent(html, {
-      waitUntil: ["domcontentloaded", "networkidle2"],
-      timeout: 60000,
-    });
+    await setPdfContent(page, html);
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,

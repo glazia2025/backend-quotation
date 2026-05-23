@@ -15,6 +15,8 @@ const STALE_TEMP_PREFIXES = [
 const STALE_TEMP_MAX_AGE_MS = Number(process.env.PDF_STALE_TEMP_MAX_AGE_MS || 60 * 60 * 1000);
 const BROWSER_CLOSE_TIMEOUT_MS = Number(process.env.PDF_BROWSER_CLOSE_TIMEOUT_MS || 5000);
 const TEMP_RM_RETRIES = Number(process.env.PDF_TEMP_RM_RETRIES || 3);
+const PDF_PROTOCOL_TIMEOUT_MS = Number(process.env.PDF_PROTOCOL_TIMEOUT_MS || 180000);
+const PDF_CONTENT_TIMEOUT_MS = Number(process.env.PDF_CONTENT_TIMEOUT_MS || 120000);
 
 const PDF_BROWSER_ARGS = [
   "--no-sandbox",
@@ -101,6 +103,7 @@ const launchPdfBrowser = async () => {
     const browser = await puppeteer.launch({
       headless: true,
       userDataDir,
+      protocolTimeout: PDF_PROTOCOL_TIMEOUT_MS,
       args: PDF_BROWSER_ARGS,
       env: {
         ...process.env,
@@ -114,6 +117,37 @@ const launchPdfBrowser = async () => {
     rmTempPath(userDataDir);
     throw error;
   }
+};
+
+const preparePdfPage = async (page) => {
+  page.setDefaultTimeout(PDF_CONTENT_TIMEOUT_MS);
+  page.setDefaultNavigationTimeout(PDF_CONTENT_TIMEOUT_MS);
+
+  await page.setRequestInterception(true);
+  page.on("request", (request) => {
+    const url = request.url();
+    const resourceType = request.resourceType();
+    const isInlineOrLocal =
+      url.startsWith("data:") ||
+      url.startsWith("about:") ||
+      url.startsWith("blob:") ||
+      url.startsWith("file:");
+
+    if (!isInlineOrLocal && ["image", "media", "font", "stylesheet"].includes(resourceType)) {
+      request.abort().catch(() => {});
+      return;
+    }
+
+    request.continue().catch(() => {});
+  });
+};
+
+const setPdfContent = async (page, html) => {
+  await preparePdfPage(page);
+  await page.setContent(html, {
+    waitUntil: ["domcontentloaded", "load"],
+    timeout: PDF_CONTENT_TIMEOUT_MS,
+  });
 };
 
 const closePdfBrowser = async (handle) => {
@@ -148,4 +182,6 @@ module.exports = {
   closePdfBrowser,
   cleanupStalePdfTempDirs,
   launchPdfBrowser,
+  preparePdfPage,
+  setPdfContent,
 };
