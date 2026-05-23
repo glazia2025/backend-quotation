@@ -17,6 +17,7 @@ const defaultAllowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
   "https://splendid-begonia-cbc292.netlify.app",
+  "https://hoppscotch.io",
 ];
 
 const allowedOrigins = new Set(

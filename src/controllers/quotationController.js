@@ -1709,6 +1709,246 @@ function buildPdfHtml(data, user) {
     </html>
   `;
 }
+// Elevation pdf 
+function buildElevationHtml(data) {
+  const items = data.items;
+
+  const rows = [];
+
+  for (let i = 0; i < items.length; i += 2) {
+    const item1 = items[i];
+    const item2 = items[i + 1];
+
+    rows.push(`
+      <div class="row">
+        ${renderItem(item1)}
+        ${item2 ? renderItem(item2) : ""}
+      </div>
+    `);
+  }
+
+  function renderItem(item) {
+    return `
+      <div class="item">
+        <div class="img-box">
+          <img src="${item.refImage}" />
+        </div>
+
+        <div class="details">
+          <div class="line1">
+            <span><b>Ref Code:</b> ${item.refCode}</span>
+            <span><b>Location:</b> ${item.location}</span>
+          </div>
+
+          <hr/>
+
+          <div class="line2">
+            <span><b>Width:</b> ${item.width}</span>
+            <span><b>Height:</b> ${item.height}</span>
+            <span><b>Area:</b> ${item.area.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+  <html>
+    <head>
+      <style>
+        body {
+          font-family: Arial;
+          padding: 20px;
+          font-size: 12px;
+          color: #222;
+        }
+
+        /* HEADER */
+        .top-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 2px solid #000;
+          padding-bottom: 8px;
+          margin-bottom: 15px;
+        }
+
+        .title {
+          font-size: 18px;
+          font-weight: bold;
+        }
+
+        .date {
+          font-size: 12px;
+        }
+
+        /* CUSTOMER BOX */
+        .customer-box {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.customer-header {
+  background: #f2f2f2;
+  padding: 8px;
+  font-weight: bold;
+  border-bottom: 1px solid #ccc;
+}
+
+.customer-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.customer-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  vertical-align: top;
+}
+
+.label {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 3px;
+}
+
+        .field {
+          border-right: 1px solid #eee;
+          padding-right: 10px;
+        }
+
+        .field:last-child {
+          border-right: none;
+        }
+
+        .field label {
+          font-size: 11px;
+          color: #777;
+        }
+
+        .field div {
+          font-weight: 500;
+        }
+
+        .grid-1 {
+          margin-bottom: 10px;
+        }
+
+        /* ITEMS */
+        .row {
+          display: flex;
+          gap: 20px;
+          margin-bottom: 20px;
+        }
+
+        .item {
+          width: 50%;
+          border: 1px solid #ddd;
+          border-radius: 8px;
+          padding: 10px;
+          background: #fafafa;
+        }
+
+        .img-box {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 200px;
+          margin-bottom: 10px;
+        }
+
+        img {
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+        }
+
+        .details {
+          padding: 5px 0;
+        }
+
+        .line1, .line2 {
+          display: flex;
+          justify-content: space-between;
+          font-size: 11px;
+        }
+
+        hr {
+          border: none;
+          border-top: 1px dashed #ccc;
+          margin: 6px 0;
+        }
+      </style>
+    </head>
+
+    <body>
+
+      <!-- HEADER -->
+      <div class="top-header">
+      <div class="title">Elevation Diagram Report</div>
+      <div class="date">
+      Date: ${new Date().toLocaleString()}
+      </div>
+      </div>
+      
+
+      <!-- CUSTOMER -->
+      <div class="customer-box">
+  <div class="customer-header">Customer Details</div>
+
+  <table class="customer-table">
+    <tr>
+      <td>
+        <div class="label">Name:</div>
+        <div>${data.customerDetails.name || ""}</div>
+      </td>
+
+      <td>
+        <div class="label">Email Address:</div>
+        <div>${data.customerDetails.email || ""}</div>
+      </td>
+
+      <td>
+        <div class="label">Phone Number:</div>
+        <div>${data.customerDetails.phone || ""}</div>
+      </td>
+    </tr>
+
+    <tr>
+      <td colspan="3">
+        <div class="label">Address:</div>
+        <div>${data.customerDetails.address || ""}</div>
+      </td>
+    </tr>
+
+    <tr>
+      <td>
+        <div class="label">City:</div>
+        <div>${data.customerDetails.city || ""}</div>
+      </td>
+
+      <td>
+        <div class="label">State:</div>
+        <div>${data.customerDetails.state || ""}</div>
+      </td>
+
+      <td>
+        <div class="label">PIN Code:</div>
+        <div>${data.customerDetails.pincode || ""}</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+      <!-- ITEMS -->
+      ${rows.join("")}
+
+    </body>
+  </html>
+  `;
+}
 
 const generateQuotationPdfController = async (req, res) => {
   let browserHandle;
@@ -1800,6 +2040,54 @@ const generateQuotationPdfController = async (req, res) => {
   }
 };
 
+// for elevation 
+const generateElevationPdfController = async (req, res) => {
+  let browserHandle;
+  let page;
+
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(req.user.userId);
+
+    const quotation = await Quotation.findById(id).lean();
+
+    if (!quotation) {
+      return res.status(404).json({ message: "Quotation not found" });
+    }
+
+    //  SAME DATA (important)
+    const preparedData = prepareQuotationPdfData(quotation);
+
+    //  DIFFERENCE → new HTML
+    const html = buildElevationHtml(preparedData);
+
+    browserHandle = await launchPdfBrowser();
+    const { browser } = browserHandle;
+
+    page = await browser.newPage();
+
+    await page.setContent(html, {
+      waitUntil: "domcontentloaded",
+    });
+
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    return res.end(pdfBuffer);
+
+  } catch (error) {
+    console.error("Elevation PDF error:", error);
+    return res.status(500).json({ message: "Elevation PDF error" });
+  } finally {
+    if (page && !page.isClosed()) await page.close();
+    await closePdfBrowser(browserHandle);
+  }
+};
+
 
 module.exports = {
   getSystems,
@@ -1812,5 +2100,6 @@ module.exports = {
   getQuotationById,
   updateQuotationById,
   deleteQuotationById,
-  generateQuotationPdfController
+  generateQuotationPdfController,
+  generateElevationPdfController,
 };
