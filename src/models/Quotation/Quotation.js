@@ -38,6 +38,8 @@ const quotationSchema = new mongoose.Schema(
         exhaustFanX: { type: Number },
         exhaustFanY: { type: Number },
         exhaustFanSize: { type: Number },
+        archType: { type: String, enum: ["none", "circular", "triangle"], default: "none" },
+        archHeightRatio: { type: Number },
         baseRate: { type: Number, default: 0 },
         areaSlabIndex: { type: Number, default: 0 },
         configuratorLayout: { type: mongoose.Schema.Types.Mixed },
@@ -77,6 +79,8 @@ const quotationSchema = new mongoose.Schema(
             exhaustFanX: { type: Number },
             exhaustFanY: { type: Number },
             exhaustFanSize: { type: Number },
+            archType: { type: String, enum: ["none", "circular", "triangle"], default: "none" },
+            archHeightRatio: { type: Number },
             baseRate: { type: Number, default: 0 },
             areaSlabIndex: { type: Number, default: 0 },
         }
