@@ -290,14 +290,45 @@ const deleteAreaSlab = async (req, res) => {
 };
 
 // -------- BaseRate CRUD --------
+// const createBaseRate = async (req, res) => {
+//   try {
+//     const payload = { ...req.body, rates: normalizeThreeRates(req.body.rates) };
+//     const baseRate = await BaseRate.create(payload);
+//     res.status(201).json(baseRate);
+//   } catch (error) {
+//     console.error("createBaseRate error", error);
+//     res.status(500).json({ message: "Unable to create base rate", error: error.message });
+//   }
+// };
 const createBaseRate = async (req, res) => {
   try {
-    const payload = { ...req.body, rates: normalizeThreeRates(req.body.rates) };
+    const payload = { ...req.body };
+
+    //  rates normalize
+    payload.rates = normalizeThreeRates(payload.rates);
+
+    //  Louvers special logic
+    if (payload.systemType === "Louvers") {
+      payload.series = null;
+      payload.description = null;
+    } else {
+      //  normal systems ke liye validation
+      if (!payload.series || !payload.description) {
+        return res.status(400).json({
+          message: "Series and description required",
+        });
+      }
+    }
+
     const baseRate = await BaseRate.create(payload);
+
     res.status(201).json(baseRate);
   } catch (error) {
     console.error("createBaseRate error", error);
-    res.status(500).json({ message: "Unable to create base rate", error: error.message });
+    res.status(500).json({
+      message: "Unable to create base rate",
+      error: error.message,
+    });
   }
 };
 
@@ -315,17 +346,60 @@ const listBaseRates = async (req, res) => {
   }
 };
 
+// const updateBaseRate = async (req, res) => {
+//   try {
+//     const payload = { ...req.body };
+//     if (payload.rates !== undefined) {
+//       payload.rates = normalizeThreeRates(payload.rates);
+//     }
+//     const baseRate = await BaseRate.findByIdAndUpdate(req.params.id, payload, {
+//       new: true,
+//       runValidators: true,
+//     });
+//     if (!baseRate) return res.status(404).json({ message: "Base rate not found" });
+//     res.json(baseRate);
+//   } catch (error) {
+//     console.error("updateBaseRate error", error);
+//     res.status(500).json({ message: "Unable to update base rate", error: error.message });
+//   }
+// };
 const updateBaseRate = async (req, res) => {
   try {
+    const existing = await BaseRate.findById(req.params.id);
     const payload = { ...req.body };
+
     if (payload.rates !== undefined) {
       payload.rates = normalizeThreeRates(payload.rates);
     }
-    const baseRate = await BaseRate.findByIdAndUpdate(req.params.id, payload, {
-      new: true,
-      runValidators: true,
-    });
-    if (!baseRate) return res.status(404).json({ message: "Base rate not found" });
+
+    //  Louvers logic
+    // if (payload.systemType === "Louvers") {
+    //   payload.series = null;
+    //   payload.description = null;
+    // }
+     if (existing.systemType === "Louvers") {
+      payload.series = "NA";
+      payload.description = "NA";
+    }
+     else {
+      if (!payload.series || !payload.description) {
+        return res.status(400).json({ message: "Series and description required" });
+      }
+    }
+
+    const baseRate = await BaseRate.findByIdAndUpdate(
+      req.params.id,
+      payload,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!baseRate) {
+      return res.status(404).json({ message: "Base rate not found" });
+    }
+
     res.json(baseRate);
   } catch (error) {
     console.error("updateBaseRate error", error);

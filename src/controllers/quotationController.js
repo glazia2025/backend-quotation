@@ -164,7 +164,18 @@ const resolveAreaSlabIndex = (area, slabs) => {
 
 const resolveBaseRate = async (systemType, series, description, area) => {
   const slabs = await getAreaSlabsSorted();
-  const baseRateDoc = await BaseRate.findOne({ systemType, series, description }).lean();
+  // const baseRateDoc = await BaseRate.findOne({ systemType, series, description }).lean();
+  let baseRateDoc;
+  //  Louvers special case
+  if (systemType === "Louvers") {
+    baseRateDoc = await BaseRate.findOne({ systemType }).lean();
+  } else {
+    baseRateDoc = await BaseRate.findOne({
+      systemType,
+      series,
+      description,
+    }).lean();
+  }
   const areaIndex = Math.min(resolveAreaSlabIndex(area, slabs), 2);
   const rates = Array.isArray(baseRateDoc?.rates)
     ? [...baseRateDoc.rates, 0, 0, 0].slice(0, 3)

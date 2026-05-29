@@ -3,8 +3,10 @@ const mongoose = require("mongoose");
 const baseRateSchema = new mongoose.Schema(
   {
     systemType: { type: String, required: true },
-    series: { type: String, required: true },
-    description: { type: String, required: true },
+    // series: { type: String, required: true },
+    // description: { type: String, required: true },
+    series: { type: String, required: false, default: null },
+description: { type: String, required: false, default: null },
     rates: {
       type: [{ type: Number, required: true }],
       required: true,
@@ -20,6 +22,6 @@ const baseRateSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-baseRateSchema.index({ systemType: 1, series: 1, description: 1 }, { unique: true });
+baseRateSchema.index({ systemType: 1, series: 1, description: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("BaseRate", baseRateSchema);
