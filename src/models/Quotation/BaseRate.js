@@ -3,8 +3,6 @@ const mongoose = require("mongoose");
 const baseRateSchema = new mongoose.Schema(
   {
     systemType: { type: String, required: true },
-    // series: { type: String, required: true },
-    // description: { type: String, required: true },
     series: { type: String, required: false, default: null },
 description: { type: String, required: false, default: null },
     rates: {
