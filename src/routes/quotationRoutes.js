@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const isUser = require("../middleware/userMiddleware");
+const BaseRate = require("../models/Quotation/BaseRate");
 
 const {
   getSystems,
@@ -34,6 +35,17 @@ router.get(
   "/systems/:systemType/series/:series/descriptions",
   getDescriptions
 );
+router.get("/louvers/rates", async (req, res) => {
+  try {
+    const baseRateDoc = await BaseRate.findOne({ systemType: "Louvers" }).lean();
+
+    return res.json({
+      rates: baseRateDoc?.rates || [0, 0, 0],
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Error fetching louvers rates" });
+  }
+});
 router.get("/options", getOptionLists);
 router.post("/rate-preview", previewRate);
 router.post("/", isUser, createQuotation);
@@ -50,5 +62,6 @@ router.get("/:id/bom", isUser, generateBomPdf);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
 router.get("/chart/:userId",getChartData);
 router.get("/stats/:userId", getDashboardStats);
+
 
 module.exports = router;

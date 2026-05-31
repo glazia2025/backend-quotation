@@ -226,10 +226,28 @@ const getSeries = async (req, res) => {
 
 const getDescriptions = async (req, res) => {
   const { systemType, series } = req.params;
-  if (!systemType || !series) {
-    return res
-      .status(400)
-      .json({ message: "systemType and series are required" });
+  // if (!systemType || !series) {
+  //   return res
+  //     .status(400)
+  //     .json({ message: "systemType and series are required" });
+  // }
+  if (!systemType) {
+    return res.status(400).json({ message: "systemType required" });
+  }
+
+  if (systemType === "Louvers") {
+    const baseRateDoc = await BaseRate.findOne({ systemType }).lean();
+
+    return res.json({
+      descriptions: [
+        {
+          name: "Louvers",
+          handleTypes: [],
+          defaultHandleCount: 0,
+          baseRates: baseRateDoc?.rates || [0, 0, 0],
+        },
+      ],
+    });
   }
 
   try {
