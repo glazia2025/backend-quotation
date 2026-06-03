@@ -1,5 +1,6 @@
 const ProfileOptions = require("../models/ProfileOptions");
 const HardwareOptions = require("../models/Hardware");
+const Product = require("../models/Product");
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -52,37 +53,21 @@ const evaluateFormula = (formula, variables) => {
 };
 
 const findProfileProductBySapCode = async (sapCode) => {
-  const wanted = normalizeCode(sapCode);
+  const wanted = String(sapCode || "").trim();
   if (!wanted) return null;
 
-  const profileOptions = await ProfileOptions.findOne({}).lean();
-  const categories = profileOptions?.categories || {};
-  const categoryEntries =
-    categories instanceof Map ? Array.from(categories.entries()) : Object.entries(categories);
+  const product = await Product.findOne({
+    sapCode: wanted,
+    enabled: true,
+  }).lean();
 
-  for (const [categoryName, categoryValue] of categoryEntries) {
-    const productsMap = categoryValue?.products || {};
-    const productEntries =
-      productsMap instanceof Map ? Array.from(productsMap.entries()) : Object.entries(productsMap);
+  if (!product) return null;
 
-    for (const [optionName, products] of productEntries) {
-      const match = (Array.isArray(products) ? products : []).find(
-        (product) => normalizeCode(product.sapCode) === wanted
-      );
-      if (match) {
-        const rate = toNumber(getMapValue(categoryValue?.rate || {}, optionName));
-        return {
-          ...match,
-          rate,
-          catalogCategory: categoryName,
-          catalogOption: optionName,
-          label: match.description || match.part || match.sapCode,
-        };
-      }
-    }
-  }
-
-  return null;
+  return {
+    ...product,
+    itemType: "profile",
+    label: product.description || product.part || product.sapCode,
+  };
 };
 
 const findHardwareBySapCode = async (sapCode) => {
@@ -118,40 +103,23 @@ const resolveCatalogProduct = async (line) => {
 };
 
 const searchProfileProductsBySapCode = async (sapCode, limit = 10) => {
-  const wanted = normalizeCode(sapCode);
+  const wanted = String(sapCode || "").trim();
   if (!wanted) return [];
 
-  const profileOptions = await ProfileOptions.findOne({}).lean();
-  const categories = profileOptions?.categories || {};
-  const categoryEntries =
-    categories instanceof Map ? Array.from(categories.entries()) : Object.entries(categories);
-  const matches = [];
+  const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-  for (const [categoryName, categoryValue] of categoryEntries) {
-    const productsMap = categoryValue?.products || {};
-    const productEntries =
-      productsMap instanceof Map ? Array.from(productsMap.entries()) : Object.entries(productsMap);
+  const products = await Product.find({
+    sapCode: { $regex: `^${escaped}`, $options: "i" },
+    enabled: true,
+  })
+    .limit(limit)
+    .lean();
 
-    for (const [optionName, products] of productEntries) {
-      for (const product of Array.isArray(products) ? products : []) {
-        if (normalizeCode(product.sapCode).includes(wanted)) {
-          const rate = toNumber(getMapValue(categoryValue?.rate || {}, optionName));
-          matches.push({
-            ...product,
-            rate,
-            itemType: "profile",
-            catalogCategory: categoryName,
-            catalogOption: optionName,
-            label: product.description || product.part || product.sapCode,
-          });
-        }
-
-        if (matches.length >= limit) return matches;
-      }
-    }
-  }
-
-  return matches;
+  return products.map((product) => ({
+    ...product,
+    itemType: "profile",
+    label: product.description || product.part || product.sapCode,
+  }));
 };
 
 const searchHardwareBySapCode = async (sapCode, limit = 10) => {
