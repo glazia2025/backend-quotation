@@ -185,8 +185,8 @@ const getItemScheduleKey = (item, config) => {
   const explicitKey = String(item?.cuttingScheduleKey || item?.scheduleKey || "").trim();
   if (isCuttingScheduleKey(explicitKey)) return explicitKey;
 
-  const horizontalAngle = item?.horizontalCutAngle || item?.cutAngleHorizontal || item?.hCutAngle;
-  const verticalAngle = item?.verticalCutAngle || item?.cutAngleVertical || item?.vCutAngle;
+  const horizontalAngle = item?.frameCutAngle || item?.cutAngleHorizontal || item?.hCutAngle;
+  const verticalAngle = item?.shutterCutAngle || item?.cutAngleVertical || item?.vCutAngle;
   if (horizontalAngle || verticalAngle) {
     return makeScheduleKey(horizontalAngle, verticalAngle);
   }

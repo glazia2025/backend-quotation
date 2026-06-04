@@ -422,7 +422,16 @@ const previewRate = async (req, res) => {
     series
   );
 
-  const amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
+  // const amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
+  let amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
+//  Arch charge
+if (
+  req.body.systemType?.toLowerCase() === "casement" &&
+  req.body.archType &&
+  req.body.archType !== "none"
+) {
+  amount += 5000;
+}
 
   res.json({
     rate: baseRate,
@@ -681,14 +690,19 @@ function computeArea(item) {
 }
 
 function computeAmount(item) {
-  const amount = toNumber(item?.amount);
-  if (amount > 0) return amount;
-
   const area = computeArea(item);
   const rate = toNumber(item?.rate);
   const quantity = toNumber(item?.quantity, 1);
-
-  return Number((area * rate * quantity).toFixed(2));
+  let amount = area * rate * quantity;
+//  Arch charge
+if (
+  item?.systemType?.toLowerCase() === "casement" &&
+  item?.archType &&
+  item.archType !== "none"
+) {
+  amount += 5000;
+}
+return Number(amount.toFixed(2));
 }
 
 function addProfit(value, profitPercentage) {

@@ -25,8 +25,8 @@ const quotationSchema = new mongoose.Schema(
         amount: { type: Number, default: 0 },
         refImage: { type: String },
         remarks: { type: String },
-        horizontalCutAngle: { type: String, enum: ["45", "90"], default: "90" },
-        verticalCutAngle: { type: String, enum: ["45", "90"], default: "90" },
+        frameCutAngle: { type: String, enum: ["45", "90"], default: "90" },
+        shutterCutAngle: { type: String, enum: ["45", "90"], default: "90" },
         cuttingScheduleKey: {
           type: String,
           enum: ["45_45", "45_90", "90_45", "90_90"],
@@ -66,8 +66,8 @@ const quotationSchema = new mongoose.Schema(
             amount: { type: Number, default: 0 },
             refImage: { type: String },
             remarks: { type: String },
-            horizontalCutAngle: { type: String, enum: ["45", "90"], default: "90" },
-            verticalCutAngle: { type: String, enum: ["45", "90"], default: "90" },
+            frameCutAngle: { type: String, enum: ["45", "90"], default: "90" },
+            shutterCutAngle: { type: String, enum: ["45", "90"], default: "90" },
             cuttingScheduleKey: {
               type: String,
               enum: ["45_45", "45_90", "90_45", "90_90"],
