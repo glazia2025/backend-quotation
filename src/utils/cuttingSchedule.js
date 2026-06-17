@@ -32,11 +32,16 @@ const evaluateFormula = (formula, variables) => {
   const source = String(formula || "").trim();
   if (!source) return "";
 
-  const withValues = source
-    .replace(/\bAREA\b/gi, String(toNumber(variables.AREA)))
-    .replace(/\bW\b/gi, String(toNumber(variables.W)))
-    .replace(/\bH\b/gi, String(toNumber(variables.H)))
-    .replace(/\bQ\b/gi, String(toNumber(variables.Q, 1)));
+  let withValues = source.toUpperCase();
+    // .replace(/\bAREA\b/gi, String(toNumber(variables.AREA)))
+    // .replace(/\bW\b/gi, String(toNumber(variables.W)))
+    // .replace(/\bH\b/gi, String(toNumber(variables.H)))
+    // .replace(/\bQ\b/gi, String(toNumber(variables.Q, 1)));
+     Object.keys(variables).forEach((key) => {
+  const value = toNumber(variables[key], 0);
+   const regex = new RegExp(`(?<![a-zA-Z0-9])${key}(?![a-zA-Z0-9])`, "gi");
+  withValues = withValues.replace(regex, String(value));
+});
 
   if (!/^[\d+\-*/().\s]+$/.test(withValues)) {
     throw new Error(`Invalid formula: ${source}`);

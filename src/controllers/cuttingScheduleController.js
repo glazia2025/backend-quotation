@@ -525,14 +525,29 @@ const buildBomData = async (quotation) => {
       H: toNumber(item.height),
       Q: itemQuantity,
       AREA: toNumber(item.area),
+      c1: toNumber(item.c1),
+      c2: toNumber(item.c2),
+      c3: toNumber(item.c3),
     };
 
     for (const line of schedule.lines) {
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
-      const dimension =
-        (line.itemType === "profile" || line.itemType === "glass") && line.dimensionFormula
-          ? evaluateFormula(line.dimensionFormula, variables)
-          : "";
+      let dimension = "";
+      if (
+        (line.itemType === "profile" || line.itemType === "glass") &&
+        line.dimensionFormula
+      ) {
+        if (line.dimensionFormula.includes(",")) {
+          const [d1, d2] = line.dimensionFormula.split(",");
+
+          const val1 = evaluateFormula(d1.trim(), variables);
+          const val2 = evaluateFormula(d2.trim(), variables);
+
+          dimension = `${val1} x ${val2}`; 
+        } else {
+          dimension = evaluateFormula(line.dimensionFormula, variables);
+        }
+      }
 
       if (line.itemType === "profile") {
         const product = await resolveCatalogProduct(line);
@@ -675,6 +690,9 @@ const buildScheduleData = async (quotation) => {
       H: toNumber(item.height),
       Q: quantity,
       AREA: toNumber(item.area),
+      c1: toNumber(item.c1),
+      c2: toNumber(item.c2),
+      c3: toNumber(item.c3),
     };
     const rows = [];
     const notes = [];
@@ -682,10 +700,22 @@ const buildScheduleData = async (quotation) => {
     for (const line of schedule?.lines || []) {
       const catalogProduct = await resolveCatalogProduct(line);
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
-      const dimension =
-        (line.itemType === "profile" || line.itemType === "glass") && line.dimensionFormula
-          ? evaluateFormula(line.dimensionFormula, variables)
-          : "";
+      let dimension = "";
+      if (
+        (line.itemType === "profile" || line.itemType === "glass") &&
+        line.dimensionFormula
+      ) {
+        if (line.dimensionFormula.includes(",")) {
+          const [d1, d2] = line.dimensionFormula.split(",");
+
+          const val1 = evaluateFormula(d1.trim(), variables);
+          const val2 = evaluateFormula(d2.trim(), variables);
+
+          dimension = `${val1} x ${val2}`;
+        } else {
+          dimension = evaluateFormula(line.dimensionFormula, variables);
+        }
+      }
       const glassSpec = String(item.glassSpec || "").trim();
       const linkedBeading =
         line.itemType === "glass" ? findLinkedBeading(config?.glassBeadingLinks, glassSpec) : null;
@@ -740,8 +770,8 @@ const buildScheduleData = async (quotation) => {
 const renderRows = (rows) =>
   rows.length
     ? rows
-    .map(
-      (row) => `
+      .map(
+        (row) => `
         <tr>
           <td>${escapeHtml(row.itemType === "profile" ? "Profile" : row.itemType === "glass" ? "Glass Beading" : "Fabrication Hardware")}</td>
           <td>${escapeHtml(row.description)}</td>
@@ -753,8 +783,8 @@ const renderRows = (rows) =>
           <td>${escapeHtml(row.position)}</td>
         </tr>
       `
-    )
-    .join("")
+      )
+      .join("")
     : '<tr><td colspan="8" class="empty">No cutting schedule items to show.</td></tr>';
 
 const renderNotes = (notes = []) =>
@@ -806,13 +836,13 @@ const buildPdfHtml = (data) => {
           <div>Project Code : ${escapeHtml(data.projectCode)}</div>
         </div>
         ${data.sections.length
-          ? data.sections
-          .map((section, index) => {
-            const item = section.item;
-            const image = item.refImage
-              ? `<img src="${escapeHtml(item.refImage)}" alt="${escapeHtml(item.refCode || "")}" />`
-              : `<div class="placeholder">No Image</div>`;
-            return `
+      ? data.sections
+        .map((section, index) => {
+          const item = section.item;
+          const image = item.refImage
+            ? `<img src="${escapeHtml(item.refImage)}" alt="${escapeHtml(item.refCode || "")}" />`
+            : `<div class="placeholder">No Image</div>`;
+          return `
               <div class="section">
                 <table class="tech">
                   <tr>
@@ -852,9 +882,9 @@ const buildPdfHtml = (data) => {
                 ${renderNotes(section.notes)}
               </div>
             `;
-          })
-          .join("")
-          : '<div class="no-data">No cutting schedule formulas are configured for the selected products and cut angle combinations.</div>'}
+        })
+        .join("")
+      : '<div class="no-data">No cutting schedule formulas are configured for the selected products and cut angle combinations.</div>'}
       </body>
     </html>
   `;
