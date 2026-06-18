@@ -525,9 +525,6 @@ const buildBomData = async (quotation) => {
       H: toNumber(item.height),
       Q: itemQuantity,
       AREA: toNumber(item.area),
-      c1: toNumber(item.c1),
-      c2: toNumber(item.c2),
-      c3: toNumber(item.c3),
     };
 
     for (const line of schedule.lines) {
@@ -690,9 +687,6 @@ const buildScheduleData = async (quotation) => {
       H: toNumber(item.height),
       Q: quantity,
       AREA: toNumber(item.area),
-      c1: toNumber(item.c1),
-      c2: toNumber(item.c2),
-      c3: toNumber(item.c3),
     };
     const rows = [];
     const notes = [];
