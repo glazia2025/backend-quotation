@@ -225,20 +225,20 @@ const upsertConfig = async (req, res) => {
 
     if (
       payload.schedules.some(
-        (schedule) => schedule.lines.filter((line) => line.itemType === "glass").length > 1
+        (schedule) => schedule.lines.filter((line) => line.itemType === "glass").length > 2
       )
     ) {
-      return res.status(400).json({ message: "Each cutting schedule can have only one glass line" });
+      return res.status(400).json({ message: "Each cutting schedule can have only two glass line" });
     }
 
     if (
       payload.schedules.some(
         (schedule) =>
           schedule.lines.length > 0 &&
-          schedule.lines.filter((line) => line.itemType === "glass").length !== 1
+          schedule.lines.filter((line) => line.itemType === "glass").length !== 2
       )
     ) {
-      return res.status(400).json({ message: "Each configured cutting schedule needs exactly one glass line" });
+      return res.status(400).json({ message: "Each configured cutting schedule needs exactly two glass line" });
     }
 
     if (
