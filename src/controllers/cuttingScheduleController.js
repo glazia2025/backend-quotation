@@ -222,25 +222,22 @@ const upsertConfig = async (req, res) => {
     ) {
       return res.status(400).json({ message: "Every profile and hardware line needs a SAP code" });
     }
-
     if (
       payload.schedules.some(
-        (schedule) => schedule.lines.filter((line) => line.itemType === "glass").length > 1
+        (schedule) => schedule.lines.filter((line) => line.itemType === "glass").length > 2
       )
     ) {
-      return res.status(400).json({ message: "Each cutting schedule can have only one glass line" });
+      return res.status(400).json({ message: "Each cutting schedule can have only two glass line" });
     }
-
     if (
       payload.schedules.some(
         (schedule) =>
           schedule.lines.length > 0 &&
-          schedule.lines.filter((line) => line.itemType === "glass").length !== 1
+          schedule.lines.filter((line) => line.itemType === "glass").length !== 2
       )
     ) {
-      return res.status(400).json({ message: "Each configured cutting schedule needs exactly one glass line" });
+      return res.status(400).json({ message: "Each configured cutting schedule needs exactly two glass line" });
     }
-
     if (
       payload.schedules.some((schedule) =>
         schedule.lines.some((line) => line.itemType === "glass" && !line.dimensionFormula)
@@ -529,10 +526,22 @@ const buildBomData = async (quotation) => {
 
     for (const line of schedule.lines) {
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
-      const dimension =
-        (line.itemType === "profile" || line.itemType === "glass") && line.dimensionFormula
-          ? evaluateFormula(line.dimensionFormula, variables)
-          : "";
+      let dimension = "";
+      if (
+        (line.itemType === "profile" || line.itemType === "glass") &&
+        line.dimensionFormula
+      ) {
+        if (line.dimensionFormula.includes(",")) {
+          const [d1, d2] = line.dimensionFormula.split(",");
+
+          const val1 = evaluateFormula(d1.trim(), variables);
+          const val2 = evaluateFormula(d2.trim(), variables);
+
+          dimension = `${val1} x ${val2}`;
+        } else {
+          dimension = evaluateFormula(line.dimensionFormula, variables);
+        }
+      }
 
       if (line.itemType === "profile") {
         const product = await resolveCatalogProduct(line);
@@ -682,26 +691,39 @@ const buildScheduleData = async (quotation) => {
     for (const line of schedule?.lines || []) {
       const catalogProduct = await resolveCatalogProduct(line);
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
-      const dimension =
-        (line.itemType === "profile" || line.itemType === "glass") && line.dimensionFormula
-          ? evaluateFormula(line.dimensionFormula, variables)
-          : "";
+      let dimension = "";
+      if (
+        (line.itemType === "profile" || line.itemType === "glass") &&
+        line.dimensionFormula
+      ) {
+        if (line.dimensionFormula.includes(",")) {
+          const [d1, d2] = line.dimensionFormula.split(",");
+
+          const val1 = evaluateFormula(d1.trim(), variables);
+          const val2 = evaluateFormula(d2.trim(), variables);
+
+          dimension = `${val1} x ${val2}`;
+        } else {
+          dimension = evaluateFormula(line.dimensionFormula, variables);
+        }
+      }
       const glassSpec = String(item.glassSpec || "").trim();
       const linkedBeading =
         line.itemType === "glass" ? findLinkedBeading(config?.glassBeadingLinks, glassSpec) : null;
 
-      if (line.itemType === "glass" && !linkedBeading) {
-        notes.push(`Beading not set for glass "${glassSpec || "-"}" by admin.`);
-        continue;
-      }
-
+      // if (line.itemType === "glass" && !linkedBeading) {
+      //   notes.push(`Beading not set for glass "${glassSpec || "-"}" by admin.`);
+      //   continue;
+      // }
       rows.push({
         itemType: line.itemType,
         description:
           line.itemType === "glass"
-            ? linkedBeading.beadingDescription || line.description || glassSpec || "Glass beading"
+            ?
+            // linkedBeading.beadingDescription || line.description ||
+            glassSpec || "Glass beading"
             : line.description || catalogProduct?.label || line.sapCode,
-        sapCode: line.itemType === "glass" ? linkedBeading.beadingSapCode : line.sapCode,
+        sapCode: line.itemType === "glass" ? "--" : line.sapCode,
         dimension,
         cutAngle: line.cutAngle || line.cutAngleLeft || line.cutAngleRight || "",
         quantity: qty,
@@ -740,12 +762,12 @@ const buildScheduleData = async (quotation) => {
 const renderRows = (rows) =>
   rows.length
     ? rows
-    .map(
-      (row) => `
+      .map(
+        (row) => `
         <tr>
-          <td>${escapeHtml(row.itemType === "profile" ? "Profile" : row.itemType === "glass" ? "Glass Beading" : "Fabrication Hardware")}</td>
+          <td>${escapeHtml(row.itemType === "profile" ? "Profile" : row.itemType === "glass" ? "Glass" : "Fabrication Hardware")}</td>
           <td>${escapeHtml(row.description)}</td>
-          <td>${escapeHtml(row.sapCode)}</td>
+           <td>${escapeHtml(row.itemType === "glass" ? "--" : row.sapCode)}</td> 
           <td class="num">${row.dimension === "" ? "" : escapeHtml(round3(row.dimension))}</td>
           <td class="num">${escapeHtml(row.cutAngle)}</td>
           <td class="num">${escapeHtml(row.quantity)}</td>
@@ -753,8 +775,8 @@ const renderRows = (rows) =>
           <td>${escapeHtml(row.position)}</td>
         </tr>
       `
-    )
-    .join("")
+      )
+      .join("")
     : '<tr><td colspan="8" class="empty">No cutting schedule items to show.</td></tr>';
 
 const renderNotes = (notes = []) =>
@@ -806,13 +828,13 @@ const buildPdfHtml = (data) => {
           <div>Project Code : ${escapeHtml(data.projectCode)}</div>
         </div>
         ${data.sections.length
-          ? data.sections
-          .map((section, index) => {
-            const item = section.item;
-            const image = item.refImage
-              ? `<img src="${escapeHtml(item.refImage)}" alt="${escapeHtml(item.refCode || "")}" />`
-              : `<div class="placeholder">No Image</div>`;
-            return `
+      ? data.sections
+        .map((section, index) => {
+          const item = section.item;
+          const image = item.refImage
+            ? `<img src="${escapeHtml(item.refImage)}" alt="${escapeHtml(item.refCode || "")}" />`
+            : `<div class="placeholder">No Image</div>`;
+          return `
               <div class="section">
                 <table class="tech">
                   <tr>
@@ -830,7 +852,6 @@ const buildPdfHtml = (data) => {
                   <tr><td class="label">Cut Angles</td><td>H = ${escapeHtml(section.horizontalAngle || "-")}°; V = ${escapeHtml(section.verticalAngle || "-")}°</td></tr>
                   <tr><td class="label">Profile Finish</td><td>${escapeHtml(item.colorFinish || "-")}</td></tr>
                   <tr><td class="label">Handle</td><td>${escapeHtml([item.handleType, item.handleColor].filter(Boolean).join(", ") || "-")}</td></tr>
-                  <tr><td class="label">Glass</td><td>${escapeHtml(item.glassSpec || "-")}</td></tr>
                   <tr><td class="label">Mesh</td><td>${escapeHtml(item.meshPresent ? item.meshType || "Yes" : "No")}</td></tr>
                 </table>
                 <div class="bar">Fabrication</div>
@@ -852,9 +873,9 @@ const buildPdfHtml = (data) => {
                 ${renderNotes(section.notes)}
               </div>
             `;
-          })
-          .join("")
-          : '<div class="no-data">No cutting schedule formulas are configured for the selected products and cut angle combinations.</div>'}
+        })
+        .join("")
+      : '<div class="no-data">No cutting schedule formulas are configured for the selected products and cut angle combinations.</div>'}
       </body>
     </html>
   `;

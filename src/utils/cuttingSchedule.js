@@ -37,7 +37,6 @@ const evaluateFormula = (formula, variables) => {
     .replace(/\bW\b/gi, String(toNumber(variables.W)))
     .replace(/\bH\b/gi, String(toNumber(variables.H)))
     .replace(/\bQ\b/gi, String(toNumber(variables.Q, 1)));
-
   if (!/^[\d+\-*/().\s]+$/.test(withValues)) {
     throw new Error(`Invalid formula: ${source}`);
   }
