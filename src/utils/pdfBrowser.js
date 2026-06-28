@@ -62,14 +62,15 @@ let staleCleanupDone = false;
 
 const allowedAssetOrigins = () => {
   const origins = new Set();
+  const quotationBucket = process.env.QUOTATION_S3_BUCKET || "quotation-img";
   const configured = [
-    process.env.AWS_S3_BASE_URL,
+    process.env.QUOTATION_S3_BASE_URL,
     ...(process.env.PDF_ALLOWED_ASSET_ORIGINS || "").split(","),
   ];
 
-  if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
+  if (quotationBucket && process.env.AWS_REGION) {
     configured.push(
-      `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com`
+      `https://${quotationBucket}.s3.${process.env.AWS_REGION}.amazonaws.com`
     );
   }
 

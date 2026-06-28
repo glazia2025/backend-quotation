@@ -11,6 +11,11 @@ const UPLOAD_CONCURRENCY = Math.max(
   1,
   Number(process.env.QUOTATION_IMAGE_UPLOAD_CONCURRENCY || 8)
 );
+const QUOTATION_S3_BUCKET =
+  process.env.QUOTATION_S3_BUCKET || "quotation-img";
+const QUOTATION_S3_BASE_URL = String(
+  process.env.QUOTATION_S3_BASE_URL || ""
+).replace(/\/$/, "");
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -37,23 +42,20 @@ const extensionByMimeType = {
 const quotationImagePrefix = (quotationId) => `quotations/${quotationId}/`;
 
 const buildPublicUrl = (key) => {
-  const baseUrl = String(process.env.AWS_S3_BASE_URL || "").replace(/\/$/, "");
-  if (baseUrl) return `${baseUrl}/${key}`;
+  if (QUOTATION_S3_BASE_URL) return `${QUOTATION_S3_BASE_URL}/${key}`;
 
-  const bucket = process.env.AWS_S3_BUCKET;
   const region = process.env.AWS_REGION;
-  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+  return `https://${QUOTATION_S3_BUCKET}.s3.${region}.amazonaws.com/${key}`;
 };
 
 const publicUrlToKey = (value) => {
   const url = String(value || "").trim();
   if (!url) return null;
 
-  const configuredBase = String(process.env.AWS_S3_BASE_URL || "").replace(/\/$/, "");
-  const defaultBase = process.env.AWS_S3_BUCKET && process.env.AWS_REGION
-    ? `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com`
+  const defaultBase = process.env.AWS_REGION
+    ? `https://${QUOTATION_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com`
     : "";
-  const base = [configuredBase, defaultBase].find(
+  const base = [QUOTATION_S3_BASE_URL, defaultBase].find(
     (candidate) => candidate && url.startsWith(`${candidate}/`)
   );
   return base ? decodeURIComponent(url.slice(base.length + 1)) : null;
@@ -110,7 +112,7 @@ const parseImage = (value) => {
 };
 
 const assertConfigured = () => {
-  if (!process.env.AWS_S3_BUCKET || !process.env.AWS_REGION) {
+  if (!QUOTATION_S3_BUCKET || !process.env.AWS_REGION) {
     const error = new Error("S3 is not configured for quotation images");
     error.statusCode = 500;
     throw error;
@@ -143,7 +145,7 @@ const uploadImage = async (quotationId, value, uploadedKeys) => {
   const key = `${quotationImagePrefix(quotationId)}${crypto.randomUUID()}.${parsed.extension}`;
   await s3Client.send(
     new PutObjectCommand({
-      Bucket: process.env.AWS_S3_BUCKET,
+      Bucket: QUOTATION_S3_BUCKET,
       Key: key,
       Body: parsed.body,
       ContentType: parsed.contentType,
@@ -210,12 +212,12 @@ async function uploadQuotationImages({ quotationId, items = [], globalConfig = {
 
 async function deleteS3Keys(keys = []) {
   const uniqueKeys = Array.from(new Set(keys.filter(Boolean)));
-  if (!uniqueKeys.length || !process.env.AWS_S3_BUCKET) return;
+  if (!uniqueKeys.length || !QUOTATION_S3_BUCKET) return;
 
   for (let index = 0; index < uniqueKeys.length; index += 1000) {
     await s3Client.send(
       new DeleteObjectsCommand({
-        Bucket: process.env.AWS_S3_BUCKET,
+        Bucket: QUOTATION_S3_BUCKET,
         Delete: {
           Objects: uniqueKeys.slice(index, index + 1000).map((Key) => ({ Key })),
           Quiet: true,
@@ -226,13 +228,13 @@ async function deleteS3Keys(keys = []) {
 }
 
 async function deleteQuotationImages(quotationId) {
-  if (!process.env.AWS_S3_BUCKET) return;
+  if (!QUOTATION_S3_BUCKET) return;
 
   let continuationToken;
   do {
     const response = await s3Client.send(
       new ListObjectsV2Command({
-        Bucket: process.env.AWS_S3_BUCKET,
+        Bucket: QUOTATION_S3_BUCKET,
         Prefix: quotationImagePrefix(quotationId),
         ContinuationToken: continuationToken,
       })
