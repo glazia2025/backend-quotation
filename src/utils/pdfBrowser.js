@@ -64,7 +64,6 @@ const allowedAssetOrigins = () => {
   const origins = new Set();
   const quotationBucket = process.env.QUOTATION_S3_BUCKET || "quotation-img";
   const configured = [
-    process.env.QUOTATION_S3_BASE_URL,
     ...(process.env.PDF_ALLOWED_ASSET_ORIGINS || "").split(","),
   ];
 

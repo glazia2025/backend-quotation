@@ -3,7 +3,10 @@ const test = require("node:test");
 const mongoose = require("mongoose");
 
 const Quotation = require("../models/Quotation/Quotation");
-const { uploadQuotationImages } = require("./quotationImages");
+const {
+  normalizeQuotationImageUrl,
+  uploadQuotationImages,
+} = require("./quotationImages");
 const { hydrateQuotationItems } = require("./quotationItems");
 
 test("legacy embedded items and sub-items remain readable", async () => {
@@ -61,4 +64,18 @@ test("existing remote and relative image URLs are preserved without S3 writes", 
   assert.equal(result.items[0].subItems[0].refImage, relativeUrl);
   assert.equal(result.globalConfig.logo, remoteUrl);
   assert.deepEqual(result.uploadedKeys, []);
+});
+
+test("incorrect legacy quotation bucket URLs are repaired", () => {
+  const previousRegion = process.env.AWS_REGION;
+  process.env.AWS_REGION = "ap-south-1";
+  const corrected = normalizeQuotationImageUrl(
+    "https://glazia.s3.ap-south-1.amazonaws.com/quotations/quote-1/image.png"
+  );
+  process.env.AWS_REGION = previousRegion;
+
+  assert.equal(
+    corrected,
+    "https://quotation-img.s3.ap-south-1.amazonaws.com/quotations/quote-1/image.png"
+  );
 });

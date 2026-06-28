@@ -13,9 +13,6 @@ const UPLOAD_CONCURRENCY = Math.max(
 );
 const QUOTATION_S3_BUCKET =
   process.env.QUOTATION_S3_BUCKET || "quotation-img";
-const QUOTATION_S3_BASE_URL = String(
-  process.env.QUOTATION_S3_BASE_URL || ""
-).replace(/\/$/, "");
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -42,8 +39,6 @@ const extensionByMimeType = {
 const quotationImagePrefix = (quotationId) => `quotations/${quotationId}/`;
 
 const buildPublicUrl = (key) => {
-  if (QUOTATION_S3_BASE_URL) return `${QUOTATION_S3_BASE_URL}/${key}`;
-
   const region = process.env.AWS_REGION;
   return `https://${QUOTATION_S3_BUCKET}.s3.${region}.amazonaws.com/${key}`;
 };
@@ -52,14 +47,40 @@ const publicUrlToKey = (value) => {
   const url = String(value || "").trim();
   if (!url) return null;
 
-  const defaultBase = process.env.AWS_REGION
-    ? `https://${QUOTATION_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com`
-    : "";
-  const base = [QUOTATION_S3_BASE_URL, defaultBase].find(
-    (candidate) => candidate && url.startsWith(`${candidate}/`)
-  );
-  return base ? decodeURIComponent(url.slice(base.length + 1)) : null;
+  try {
+    const key = decodeURIComponent(new URL(url).pathname.replace(/^\//, ""));
+    return key.startsWith("quotations/") ? key : null;
+  } catch (_error) {
+    return null;
+  }
 };
+
+const normalizeQuotationImageUrl = (value) => {
+  const key = publicUrlToKey(value);
+  return key ? buildPublicUrl(key) : value;
+};
+
+const normalizeQuotationImageReferences = (quotation = {}) => ({
+  ...quotation,
+  globalConfig: quotation.globalConfig
+    ? {
+        ...quotation.globalConfig,
+        logo: normalizeQuotationImageUrl(quotation.globalConfig.logo),
+      }
+    : quotation.globalConfig,
+  items: Array.isArray(quotation.items)
+    ? quotation.items.map((item) => ({
+        ...item,
+        refImage: normalizeQuotationImageUrl(item?.refImage),
+        subItems: Array.isArray(item?.subItems)
+          ? item.subItems.map((subItem) => ({
+              ...subItem,
+              refImage: normalizeQuotationImageUrl(subItem?.refImage),
+            }))
+          : item?.subItems,
+      }))
+    : quotation.items,
+});
 
 const collectQuotationImageKeys = ({ items = [], globalConfig = {} } = {}) => {
   const values = [globalConfig?.logo];
@@ -250,5 +271,7 @@ module.exports = {
   collectQuotationImageKeys,
   deleteQuotationImages,
   deleteS3Keys,
+  normalizeQuotationImageReferences,
+  normalizeQuotationImageUrl,
   uploadQuotationImages,
 };

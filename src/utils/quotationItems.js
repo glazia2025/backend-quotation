@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const QuotationItem = require("../models/Quotation/QuotationItem");
+const { normalizeQuotationImageReferences } = require("./quotationImages");
 
 const INTERNAL_FIELDS = new Set([
   "_id",
@@ -73,10 +74,10 @@ async function hydrateQuotationItems(quotation) {
     : [];
 
   if (referenceIds.length === 0) {
-    return {
+    return normalizeQuotationImageReferences({
       ...quotation,
       items: Array.isArray(quotation.items) ? quotation.items : [],
-    };
+    });
   }
 
   const documents = await QuotationItem.find({ quotation: quotation._id }).lean();
@@ -94,10 +95,10 @@ async function hydrateQuotationItems(quotation) {
     };
   };
 
-  return {
+  return normalizeQuotationImageReferences({
     ...quotation,
     items: referenceIds.map((id) => toApiItem(byId.get(id))).filter(Boolean),
-  };
+  });
 }
 
 async function deleteQuotationItems(quotationId, filter = {}) {

@@ -2,6 +2,7 @@ const QuotationConfig = require("../models/QuotationConfig");
 const {
   collectQuotationImageKeys,
   deleteS3Keys,
+  normalizeQuotationImageUrl,
   uploadQuotationImages,
 } = require("../utils/quotationImages");
 
@@ -12,7 +13,10 @@ const getQuotationConfig = async (req, res) => {
     if (!config) {
       return res.status(404).json({ message: "Config not found" });
     }
-    res.json(config);
+    res.json({
+      ...config,
+      logo: normalizeQuotationImageUrl(config.logo),
+    });
   } catch (error) {
     console.error("Error fetching quotation config:", error);
     res.status(500).json({ message: "Error fetching quotation config" });
@@ -51,7 +55,9 @@ const createOrUpdateQuotationConfig = async (req, res) => {
     ).catch((error) => {
       console.warn("Failed to remove replaced quotation logo:", error.message);
     });
-    res.json(config);
+    const configResponse = config.toObject();
+    configResponse.logo = normalizeQuotationImageUrl(configResponse.logo);
+    res.json(configResponse);
   } catch (error) {
     await deleteS3Keys(uploadedKeys).catch(() => {});
     console.error("Error updating quotation config:", error);
