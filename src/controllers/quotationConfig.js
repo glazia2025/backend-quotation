@@ -1,4 +1,9 @@
 const QuotationConfig = require("../models/QuotationConfig");
+const {
+  collectQuotationImageKeys,
+  deleteS3Keys,
+  uploadQuotationImages,
+} = require("../utils/quotationImages");
 
 const getQuotationConfig = async (req, res) => {
   try {
@@ -15,23 +20,44 @@ const getQuotationConfig = async (req, res) => {
 };
 
 const createOrUpdateQuotationConfig = async (req, res) => {
+  let uploadedKeys = [];
   try {
-    const {_id} = req.body;
-    if (_id) {
-      const config = await QuotationConfig.findOneAndUpdate(
-            { user: req.user.userId },
-            req.body,
-            { new: true, upsert: true }
-        );
-      res.json(config);
-    } else {
-        const config = await QuotationConfig.create({...req.body, user: req.user.userId });
-        res.json(config);
-    }
-    
+    const existingConfig = await QuotationConfig.findOne({
+      user: req.user.userId,
+    }).lean();
+    const previousImageKeys = collectQuotationImageKeys({
+      globalConfig: existingConfig || {},
+    });
+    const prepared = await uploadQuotationImages({
+      quotationId: `config-${req.user.userId}`,
+      items: [],
+      globalConfig: req.body,
+    });
+    uploadedKeys = prepared.uploadedKeys;
+
+    const { _id: _ignoredId, user: _ignoredUser, ...payload } = req.body;
+    payload.logo = prepared.globalConfig.logo;
+
+    const config = await QuotationConfig.findOneAndUpdate(
+      { user: req.user.userId },
+      { ...payload, user: req.user.userId },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+    const currentImageKeys = new Set(
+      collectQuotationImageKeys({ globalConfig: config.toObject() })
+    );
+    await deleteS3Keys(
+      previousImageKeys.filter((key) => !currentImageKeys.has(key))
+    ).catch((error) => {
+      console.warn("Failed to remove replaced quotation logo:", error.message);
+    });
+    res.json(config);
   } catch (error) {
+    await deleteS3Keys(uploadedKeys).catch(() => {});
     console.error("Error updating quotation config:", error);
-    res.status(500).json({ message: "Error updating quotation config" });
+    res.status(error.statusCode || 500).json({
+      message: error.message || "Error updating quotation config",
+    });
   }
 };
 

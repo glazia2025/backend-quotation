@@ -7,7 +7,9 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "check": "node --check src/server.js",
-    "seed:quotations": "node src/utils/seedQuotationDemo.js"
+    "test": "node --test src/utils/quotationCompatibility.test.js",
+    "seed:quotations": "node src/utils/seedQuotationDemo.js",
+    "migrate:quotation-items": "node src/utils/migrateQuotationItems.js"
   },
   "keywords": [],
   "author": "",

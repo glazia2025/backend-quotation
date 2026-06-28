@@ -43,7 +43,9 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ extended: false, limit: "10mb" }));
+// Item images can make a normalized multi-item save larger than the old limit,
+// even though the resulting MongoDB documents are now stored separately.
+app.use(express.json({ extended: false, limit: "50mb" }));
 
 connectDB();
 

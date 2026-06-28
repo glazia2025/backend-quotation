@@ -18,6 +18,9 @@ const BROWSER_CLOSE_TIMEOUT_MS = Number(process.env.PDF_BROWSER_CLOSE_TIMEOUT_MS
 const TEMP_RM_RETRIES = Number(process.env.PDF_TEMP_RM_RETRIES || 3);
 const PDF_PROTOCOL_TIMEOUT_MS = Number(process.env.PDF_PROTOCOL_TIMEOUT_MS || 180000);
 const PDF_CONTENT_TIMEOUT_MS = Number(process.env.PDF_CONTENT_TIMEOUT_MS || 120000);
+const PDF_BROWSER_LAUNCH_TIMEOUT_MS = Number(
+  process.env.PDF_BROWSER_LAUNCH_TIMEOUT_MS || 30000
+);
 
 const PDF_BROWSER_ARGS = [
   "--no-sandbox",
@@ -37,6 +40,48 @@ const PDF_BROWSER_ARGS = [
   "--no-first-run",
   "--no-default-browser-check",
 ];
+
+const withTimeout = (promise, timeoutMs, message) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
+let sharedBrowserHandle = null;
+let sharedBrowserPromise = null;
+let staleCleanupDone = false;
+
+const allowedAssetOrigins = () => {
+  const origins = new Set();
+  const configured = [
+    process.env.AWS_S3_BASE_URL,
+    ...(process.env.PDF_ALLOWED_ASSET_ORIGINS || "").split(","),
+  ];
+
+  if (process.env.AWS_S3_BUCKET && process.env.AWS_REGION) {
+    configured.push(
+      `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com`
+    );
+  }
+
+  configured.filter(Boolean).forEach((value) => {
+    try {
+      origins.add(new URL(String(value).trim()).origin);
+    } catch (_error) {
+      // Ignore malformed optional asset origins.
+    }
+  });
+  return origins;
+};
 
 const assertTempSpaceAvailable = () => {
   fs.mkdirSync(PDF_TEMP_DIR, { recursive: true });
@@ -93,31 +138,50 @@ const cleanupStalePdfTempDirs = (maxAgeMs = STALE_TEMP_MAX_AGE_MS) => {
 };
 
 const launchPdfBrowser = async () => {
-  cleanupStalePdfTempDirs();
+  if (sharedBrowserHandle?.browser?.connected) return sharedBrowserHandle;
+  if (sharedBrowserPromise) return sharedBrowserPromise;
+
+  if (!staleCleanupDone) {
+    cleanupStalePdfTempDirs();
+    staleCleanupDone = true;
+  }
   assertTempSpaceAvailable();
 
-  const userDataDir = fs.mkdtempSync(path.join(PDF_TEMP_DIR, STALE_TEMP_PREFIX));
-  const cacheDir = path.join(userDataDir, "cache");
-  fs.mkdirSync(cacheDir, { recursive: true });
+  sharedBrowserPromise = (async () => {
+    const userDataDir = fs.mkdtempSync(path.join(PDF_TEMP_DIR, STALE_TEMP_PREFIX));
+    const cacheDir = path.join(userDataDir, "cache");
+    fs.mkdirSync(cacheDir, { recursive: true });
 
-  try {
-    const browser = await puppeteer.launch({
-      headless: true,
-      userDataDir,
-      protocolTimeout: PDF_PROTOCOL_TIMEOUT_MS,
-      args: PDF_BROWSER_ARGS,
-      env: {
-        ...process.env,
-        XDG_CACHE_HOME: cacheDir,
-        XDG_CONFIG_HOME: userDataDir,
-      },
-    });
+    try {
+      const browser = await puppeteer.launch({
+        headless: true,
+        userDataDir,
+        timeout: PDF_BROWSER_LAUNCH_TIMEOUT_MS,
+        protocolTimeout: PDF_PROTOCOL_TIMEOUT_MS,
+        args: PDF_BROWSER_ARGS,
+        env: {
+          ...process.env,
+          XDG_CACHE_HOME: cacheDir,
+          XDG_CONFIG_HOME: userDataDir,
+        },
+      });
 
-    return { browser, userDataDir };
-  } catch (error) {
-    rmTempPath(userDataDir);
-    throw error;
-  }
+      const handle = { browser, userDataDir, shared: true };
+      browser.once("disconnected", () => {
+        if (sharedBrowserHandle === handle) sharedBrowserHandle = null;
+        rmTempPath(userDataDir);
+      });
+      sharedBrowserHandle = handle;
+      return handle;
+    } catch (error) {
+      rmTempPath(userDataDir);
+      throw error;
+    } finally {
+      sharedBrowserPromise = null;
+    }
+  })();
+
+  return sharedBrowserPromise;
 };
 
 const preparePdfPage = async (page) => {
@@ -125,6 +189,7 @@ const preparePdfPage = async (page) => {
   page.setDefaultNavigationTimeout(PDF_CONTENT_TIMEOUT_MS);
 
   await page.setRequestInterception(true);
+  const permittedOrigins = allowedAssetOrigins();
   page.on("request", (request) => {
     const url = request.url();
     const resourceType = request.resourceType();
@@ -133,8 +198,20 @@ const preparePdfPage = async (page) => {
       url.startsWith("about:") ||
       url.startsWith("blob:") ||
       url.startsWith("file:");
+    let isPermittedRemoteImage = false;
+    if (resourceType === "image" && !isInlineOrLocal) {
+      try {
+        isPermittedRemoteImage = permittedOrigins.has(new URL(url).origin);
+      } catch (_error) {
+        isPermittedRemoteImage = false;
+      }
+    }
 
-    if (!isInlineOrLocal && ["image", "media", "font", "stylesheet"].includes(resourceType)) {
+    if (
+      !isInlineOrLocal &&
+      !isPermittedRemoteImage &&
+      ["image", "media", "font", "stylesheet"].includes(resourceType)
+    ) {
       request.abort().catch(() => {});
       return;
     }
@@ -153,17 +230,17 @@ const setPdfContent = async (page, html) => {
 
 const closePdfBrowser = async (handle) => {
   if (!handle) return;
+  if (handle.shared) return;
 
   try {
     if (handle.browser) {
       const browserProcess = handle.browser.process?.();
       try {
-        await Promise.race([
+        await withTimeout(
           handle.browser.close(),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Timed out while closing PDF browser")), BROWSER_CLOSE_TIMEOUT_MS)
-          ),
-        ]);
+          BROWSER_CLOSE_TIMEOUT_MS,
+          "Timed out while closing PDF browser"
+        );
       } catch (error) {
         console.warn("PDF browser did not close cleanly:", error.message);
         if (browserProcess && !browserProcess.killed) {
@@ -179,10 +256,37 @@ const closePdfBrowser = async (handle) => {
   }
 };
 
+const shutdownPdfBrowser = async () => {
+  const handle = sharedBrowserHandle;
+  sharedBrowserHandle = null;
+  if (!handle) return;
+
+  try {
+    await withTimeout(
+      handle.browser.close(),
+      BROWSER_CLOSE_TIMEOUT_MS,
+      "Timed out while closing shared PDF browser"
+    );
+  } catch (error) {
+    const browserProcess = handle.browser.process?.();
+    if (browserProcess && !browserProcess.killed) browserProcess.kill("SIGKILL");
+  } finally {
+    rmTempPath(handle.userDataDir);
+  }
+};
+
+process.once("exit", () => {
+  const handle = sharedBrowserHandle;
+  const browserProcess = handle?.browser?.process?.();
+  if (browserProcess && !browserProcess.killed) browserProcess.kill("SIGKILL");
+  if (handle?.userDataDir) rmTempPath(handle.userDataDir);
+});
+
 module.exports = {
   closePdfBrowser,
   cleanupStalePdfTempDirs,
   launchPdfBrowser,
   preparePdfPage,
   setPdfContent,
+  shutdownPdfBrowser,
 };

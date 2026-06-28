@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Quotation = require("../models/Quotation/Quotation");
+const QuotationItem = require("../models/Quotation/QuotationItem");
 const User = require("../models/User");
 const System = require("../models/Quotation/System");
 const Series = require("../models/Quotation/Series");
@@ -14,6 +15,17 @@ const { extractAuthToken } = require("../utils/authCookies");
 const { verifyJwt } = require("../utils/jwt");
 const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
 const { colorMapToArray } = require("../utils/handleOptionUtils");
+const {
+  createQuotationItems,
+  deleteQuotationItems,
+  hydrateQuotationItems,
+} = require("../utils/quotationItems");
+const {
+  collectQuotationImageKeys,
+  deleteQuotationImages,
+  deleteS3Keys,
+  uploadQuotationImages,
+} = require("../utils/quotationImages");
 
 const numberOr = (value, fallback = 0) => {
   const asNumber = Number(value);
@@ -455,12 +467,21 @@ const createQuotation = async (req, res) => {
     globalConfig = {},
   } = req.body;
 
+  let quotation;
+  let uploadedKeys = [];
+  const quotationId = new mongoose.Types.ObjectId();
   try {
     const generatedId = await getNextQuotationId(req.user?.userId);
-    console.log('generatedId', generatedId);
-    const quotation = await Quotation.create({
-      user: req.user?.userId,
+    const prepared = await uploadQuotationImages({
+      quotationId,
       items,
+      globalConfig,
+    });
+    uploadedKeys = prepared.uploadedKeys;
+
+    quotation = await Quotation.create({
+      _id: quotationId,
+      user: req.user?.userId,
       customerDetails,
       quotationDetails: {
         ...quotationDetails
@@ -468,14 +489,31 @@ const createQuotation = async (req, res) => {
 
       generatedId,
 
-      globalConfig,
+      globalConfig: prepared.globalConfig,
       breakdown,
     });
 
-    res.status(201).json({ quotation });
+    const { topLevelIds } = await createQuotationItems(
+      quotation._id,
+      prepared.items
+    );
+    quotation.quotationItems = topLevelIds;
+    await quotation.save();
+
+    const hydratedQuotation = await hydrateQuotationItems(quotation.toObject());
+    res.status(201).json({ quotation: hydratedQuotation });
   } catch (error) {
+    if (quotation?._id) {
+      await Promise.allSettled([
+        deleteQuotationItems(quotation._id),
+        Quotation.findByIdAndDelete(quotation._id),
+      ]);
+    }
+    await deleteS3Keys(uploadedKeys).catch(() => {});
     console.error("Error creating quotation:", error);
-    res.status(500).json({ message: "Error creating quotation" });
+    res.status(error.statusCode || 500).json({
+      message: error.message || "Error creating quotation",
+    });
   }
 };
 const listQuotations = async (req, res) => {
@@ -484,21 +522,30 @@ const listQuotations = async (req, res) => {
   const filter = {};
   if (req.user?.role !== "admin") filter.user = req.user?.userId;
 
-  if (systemType) filter.systemType = systemType;
-  if (series) filter.series = series;
-  if (description) filter.description = description;
-
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   const skip = (pageNum - 1) * limitNum;
 
   try {
+    const itemFilter = {};
+    if (systemType) itemFilter.systemType = systemType;
+    if (series) itemFilter.series = series;
+    if (description) itemFilter.description = description;
+
+    if (Object.keys(itemFilter).length > 0) {
+      const quotationIds = await QuotationItem.distinct("quotation", itemFilter);
+      filter.$or = [
+        { _id: { $in: quotationIds } },
+        { items: { $elemMatch: itemFilter } },
+      ];
+    }
+
     const [quotations, total] = await Promise.all([
       Quotation.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
-        .select("_id user customerDetails quotationDetails breakdown generatedId createdAt updatedAt items.amount") // keep list light
+        .select("_id user customerDetails quotationDetails breakdown generatedId createdAt updatedAt items.amount quotationItems")
         .lean(),
       Quotation.countDocuments(filter),
     ]);
@@ -552,7 +599,7 @@ const getQuotationById = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    res.json({ quotation });
+    res.json({ quotation: await hydrateQuotationItems(quotation) });
   } catch (error) {
     console.error("Error fetching quotation:", error);
     res.status(500).json({ message: "Error fetching quotation" });
@@ -570,6 +617,15 @@ const updateQuotationById = async (req, res) => {
       return res.status(404).json({ message: "Quotation not found" });
     }
 
+    if (
+      req.user?.role !== "admin" &&
+      quotation.user &&
+      req.user?.userId &&
+      quotation.user.toString() !== req.user.userId
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
     const {
       breakdown,
       items = [],
@@ -577,23 +633,66 @@ const updateQuotationById = async (req, res) => {
       quotationDetails = {},
       globalConfig = {},
     } = req.body;
+    const existingHydratedQuotation = await hydrateQuotationItems(quotation);
+    const previousImageKeys = collectQuotationImageKeys(existingHydratedQuotation);
 
-    const updatedQuotation = await Quotation.findByIdAndUpdate(
-      req.params.id,
-      {
-        items,
-        customerDetails,
-        quotationDetails,
-        globalConfig,
-        breakdown,
-      },
-      { new: true, runValidators: true }
+    const prepared = await uploadQuotationImages({
+      quotationId: quotation._id,
+      items,
+      globalConfig,
+    });
+    const { topLevelIds, allIds } = await createQuotationItems(
+      quotation._id,
+      prepared.items
+    ).catch(async (error) => {
+      await deleteS3Keys(prepared.uploadedKeys).catch(() => {});
+      throw error;
+    });
+    let updatedQuotation;
+    try {
+      updatedQuotation = await Quotation.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            quotationItems: topLevelIds,
+            customerDetails,
+            quotationDetails,
+            globalConfig: prepared.globalConfig,
+            breakdown,
+          },
+          $unset: { items: 1 },
+        },
+        { new: true, runValidators: true }
+      ).lean();
+    } catch (error) {
+      if (allIds.length > 0) {
+        await QuotationItem.deleteMany({ _id: { $in: allIds } });
+      }
+      await deleteS3Keys(prepared.uploadedKeys).catch(() => {});
+      throw error;
+    }
+
+    await deleteQuotationItems(
+      quotation._id,
+      allIds.length > 0 ? { _id: { $nin: allIds } } : {}
     );
 
-    res.json({ updatedQuotation });
+    const hydratedUpdatedQuotation = await hydrateQuotationItems(updatedQuotation);
+    const currentImageKeys = new Set(
+      collectQuotationImageKeys(hydratedUpdatedQuotation)
+    );
+    await deleteS3Keys(
+      previousImageKeys.filter((key) => !currentImageKeys.has(key))
+    ).catch((error) => {
+      console.warn(`Failed to remove replaced quotation images:`, error.message);
+    });
+
+    res.json({ updatedQuotation: hydratedUpdatedQuotation });
   } catch (error) {
-    console.error("Error fetching quotation:", error);
-    res.status(500).json({ message: "Error fetching quotation" });
+    console.error("Error updating quotation:", error);
+    res.status(error.statusCode || 500).json({
+      message: error.message || "Error updating quotation",
+    });
   }
 };
 const deleteQuotationById = async (req, res) => {
@@ -609,11 +708,17 @@ const deleteQuotationById = async (req, res) => {
     // Role based check
     if (
       req.user?.role !== "admin" &&
+      quotation.user &&
+      req.user?.userId &&
       quotation.user.toString() !== req.user.userId
     ) {
       return res.status(403).json({ message: "Forbidden" });
     }
+    await deleteQuotationItems(id);
     await Quotation.findByIdAndDelete(id);
+    await deleteQuotationImages(id).catch((error) => {
+      console.warn(`Failed to delete S3 images for quotation ${id}:`, error.message);
+    });
     res.json({ message: "Quotation deleted successfully" });
   } catch (error) {
     console.error("Delete quotation error:", error);
@@ -2008,7 +2113,7 @@ const generateQuotationPdfController = async (req, res) => {
       ? { $or: [{ _id: id }, { generatedId: id }] }
       : { generatedId: id };
 
-    const quotation = await Quotation.findOne(query).lean();
+    let quotation = await Quotation.findOne(query).lean();
 
     if (!quotation) {
       return res.status(404).json({
@@ -2016,6 +2121,8 @@ const generateQuotationPdfController = async (req, res) => {
         message: "Quotation not found.",
       });
     }
+
+    quotation = await hydrateQuotationItems(quotation);
 
     const preparedData = prepareQuotationPdfData(quotation);
     const html = buildPdfHtml(preparedData, user);
@@ -2086,11 +2193,13 @@ const generateElevationPdfController = async (req, res) => {
 
     const user = await User.findById(req.user.userId);
 
-    const quotation = await Quotation.findById(id).lean();
+    let quotation = await Quotation.findById(id).lean();
 
     if (!quotation) {
       return res.status(404).json({ message: "Quotation not found" });
     }
+
+    quotation = await hydrateQuotationItems(quotation);
 
     //  SAME DATA (important)
     const preparedData = prepareQuotationPdfData(quotation);
@@ -2103,9 +2212,7 @@ const generateElevationPdfController = async (req, res) => {
 
     page = await browser.newPage();
 
-    await page.setContent(html, {
-      waitUntil: "domcontentloaded",
-    });
+    await setPdfContent(page, html);
 
     const pdfBuffer = await page.pdf({
       format: "A4",

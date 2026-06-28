@@ -3,92 +3,12 @@ const mongoose = require("mongoose");
 const quotationSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    items: [
-      {
-        refCode: { type: String },
-        location: { type: String },
-        width: { type: Number, default: 0 },
-        height: { type: Number, default: 0 },
-        area: { type: Number, default: 0 },
-        systemType: { type: String },
-        series: { type: String },
-        description: { type: String },
-        colorFinish: { type: String },
-        glassSpec: { type: String },
-        handleType: { type: String },
-        handleColor: { type: String },
-        handleCount: { type: Number, default: 0 },
-        meshPresent: { type: Boolean, default: false },
-        meshType: { type: String },
-        rate: { type: Number, default: 0 },
-        quantity: { type: Number, default: 1 },
-        amount: { type: Number, default: 0 },
-        refImage: { type: String },
-        remarks: { type: String },
-        frameCutAngle: { type: String, enum: ["45", "90"], default: "90" },
-        shutterCutAngle: { type: String, enum: ["45", "90"], default: "90" },
-        cuttingScheduleKey: {
-          type: String,
-          enum: ["45_45", "45_90", "90_45", "90_90"],
-          default: "90_90",
-        },
-        sash: { type: String },
-        panelSashes: [{ type: String }],
-        hasExhaustFan: { type: Boolean, default: false },
-        exhaustFanX: { type: Number },
-        exhaustFanY: { type: Number },
-        exhaustFanSize: { type: Number },
-        archType: { type: String, enum: ["none", "circular", "triangle"], default: "none" },
-        archHeightRatio: { type: Number },
-        baseRate: { type: Number, default: 0 },
-        areaSlabIndex: { type: Number, default: 0 },
-        configuratorLayout: { type: mongoose.Schema.Types.Mixed },
-        subItems: {
-          type: [
-            {
-            refCode: { type: String },
-            location: { type: String },
-            width: { type: Number, default: 0 },
-            height: { type: Number, default: 0 },
-            area: { type: Number, default: 0 },
-            systemType: { type: String },
-            series: { type: String },
-            description: { type: String },
-            colorFinish: { type: String },
-            glassSpec: { type: String },
-            handleType: { type: String },
-            handleColor: { type: String },
-            handleCount: { type: Number, default: 0 },
-            meshPresent: { type: Boolean, default: false },
-            meshType: { type: String },
-            rate: { type: Number, default: 0 },
-            quantity: { type: Number, default: 1 },
-            amount: { type: Number, default: 0 },
-            refImage: { type: String },
-            remarks: { type: String },
-            frameCutAngle: { type: String, enum: ["45", "90"], default: "90" },
-            shutterCutAngle: { type: String, enum: ["45", "90"], default: "90" },
-            cuttingScheduleKey: {
-              type: String,
-              enum: ["45_45", "45_90", "90_45", "90_90"],
-              default: "90_90",
-            },
-            sash: { type: String },
-            panelSashes: [{ type: String }],
-            hasExhaustFan: { type: Boolean, default: false },
-            exhaustFanX: { type: Number },
-            exhaustFanY: { type: Number },
-            exhaustFanSize: { type: Number },
-            archType: { type: String, enum: ["none", "circular", "triangle"], default: "none" },
-            archHeightRatio: { type: Number },
-            baseRate: { type: Number, default: 0 },
-            areaSlabIndex: { type: Number, default: 0 },
-        }
-          ],
-          required: false,
-        }
-      },
+    // New quotations store only references here. `items` is retained as a
+    // read-only compatibility field for quotations created before normalization.
+    quotationItems: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "QuotationItem" },
     ],
+    items: { type: [mongoose.Schema.Types.Mixed], default: undefined },
     customerDetails: {
       name: { type: String, default: "" },
       email: { type: String, default: "" },
@@ -129,7 +49,7 @@ const quotationSchema = new mongoose.Schema(
         showTransport: { type: Boolean, default: true },
         showLoadingUnloading: { type: Boolean, default: true },
         showDiscount: { type: Boolean, default: true },
-      }
+      },
     },
     generatedId: { type: String, unique: true },
   },
@@ -137,13 +57,5 @@ const quotationSchema = new mongoose.Schema(
 );
 
 quotationSchema.index({ user: 1, createdAt: -1 });
-
-// Optional but useful for admin filtering:
-quotationSchema.index({ systemType: 1, createdAt: -1 });
-quotationSchema.index({ series: 1, createdAt: -1 });
-quotationSchema.index({ description: 1, createdAt: -1 });
-
-// If admin commonly filters by combos:
-quotationSchema.index({ systemType: 1, series: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Quotation", quotationSchema);

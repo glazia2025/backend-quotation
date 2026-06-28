@@ -10,11 +10,13 @@ const User = require("../models/User");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
 const { restoreRateMap } = require("../utils/rateMapUtils");
+const { hydrateQuotationItems } = require("../utils/quotationItems");
 const {
+  catalogProductKey,
   escapeHtml,
   evaluateFormula,
   listProfileProducts,
-  resolveCatalogProduct,
+  resolveCatalogProducts,
   round3,
   searchCatalogProducts,
   toNumber,
@@ -310,6 +312,33 @@ const itemRowsForSchedule = (quotation) => {
   return rows;
 };
 
+const uniqueConfigKeys = (items) =>
+  Array.from(
+    new Map(
+      items.map((item) => {
+        const key = `${item.systemType || ""}||${item.series || ""}||${item.description || ""}`;
+        return [
+          key,
+          {
+            systemType: item.systemType || "",
+            series: item.series || "",
+            description: item.description || "",
+          },
+        ];
+      })
+    ).values()
+  );
+
+const configCatalogLines = (configs) =>
+  configs.flatMap((config) => [
+    ...(config.lines || []),
+    ...(config.schedules || []).flatMap((schedule) => schedule.lines || []),
+    ...(config.glassBeadingLinks || []).map((link) => ({
+      itemType: "profile",
+      sapCode: link.beadingSapCode,
+    })),
+  ]);
+
 const findLinkedBeading = (links = [], glassSpec = "") => {
   const selectedGlass = String(glassSpec || "").trim();
   if (!selectedGlass) return null;
@@ -489,11 +518,7 @@ const addBomRow = (groups, row) => {
 
 const buildBomData = async (quotation) => {
   const sourceItems = itemRowsForSchedule(quotation);
-  const keys = sourceItems.map((item) => ({
-    systemType: item.systemType || "",
-    series: item.series || "",
-    description: item.description || "",
-  }));
+  const keys = uniqueConfigKeys(sourceItems);
 
   const [configs, pricingContext] = await Promise.all([
     CuttingScheduleConfig.find({
@@ -506,6 +531,7 @@ const buildBomData = async (quotation) => {
     acc[`${config.systemType}||${config.series}||${config.description}`] = config;
     return acc;
   }, {});
+  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs));
 
   const groups = new Map();
   const notes = [];
@@ -544,7 +570,7 @@ const buildBomData = async (quotation) => {
       }
 
       if (line.itemType === "profile") {
-        const product = await resolveCatalogProduct(line);
+        const product = catalogProducts.get(catalogProductKey(line));
         const adjustment = getProfileAdjustment(product, pricingContext);
         const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
         const lengthMm = toNumber(dimension, toNumber(product?.length, 0));
@@ -563,7 +589,7 @@ const buildBomData = async (quotation) => {
       }
 
       if (line.itemType === "hardware") {
-        const product = await resolveCatalogProduct(line);
+        const product = catalogProducts.get(catalogProductKey(line));
         const rate = product
           ? round2(toNumber(product.rate) + getHardwareAdjustment(product, pricingContext))
           : 0;
@@ -603,10 +629,11 @@ const buildBomData = async (quotation) => {
           amount: glassRate * glassArea,
         });
 
-        const beadingProduct = await resolveCatalogProduct({
+        const beadingLine = {
           itemType: "profile",
           sapCode: linkedBeading.beadingSapCode,
-        });
+        };
+        const beadingProduct = catalogProducts.get(catalogProductKey(beadingLine));
         const adjustment = getProfileAdjustment(beadingProduct, pricingContext);
         const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
         const lengthMm = toNumber(dimension, toNumber(beadingProduct?.length, 0));
@@ -658,11 +685,7 @@ const buildBomData = async (quotation) => {
 
 const buildScheduleData = async (quotation) => {
   const sourceItems = itemRowsForSchedule(quotation);
-  const keys = sourceItems.map((item) => ({
-    systemType: item.systemType || "",
-    series: item.series || "",
-    description: item.description || "",
-  }));
+  const keys = uniqueConfigKeys(sourceItems);
 
   const configs = await CuttingScheduleConfig.find({
     $or: keys.length ? keys : [{ systemType: "__none__" }],
@@ -672,6 +695,7 @@ const buildScheduleData = async (quotation) => {
     acc[`${config.systemType}||${config.series}||${config.description}`] = config;
     return acc;
   }, {});
+  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs));
 
   const sections = [];
   for (const item of sourceItems) {
@@ -689,7 +713,7 @@ const buildScheduleData = async (quotation) => {
     const notes = [];
 
     for (const line of schedule?.lines || []) {
-      const catalogProduct = await resolveCatalogProduct(line);
+      const catalogProduct = catalogProducts.get(catalogProductKey(line));
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
       let dimension = "";
       if (
@@ -1186,7 +1210,7 @@ const generateCuttingSchedulePdf = async (req, res) => {
       ? { $or: [{ _id: id }, { generatedId: id }] }
       : { generatedId: id };
 
-    const quotation = await Quotation.findOne(query).lean();
+    let quotation = await Quotation.findOne(query).lean();
     if (!quotation) return res.status(404).json({ message: "Quotation not found" });
 
     if (
@@ -1197,6 +1221,8 @@ const generateCuttingSchedulePdf = async (req, res) => {
     ) {
       return res.status(403).json({ message: "Forbidden" });
     }
+
+    quotation = await hydrateQuotationItems(quotation);
 
     const data = await buildScheduleData(quotation);
     const html = buildPdfHtml(data);
@@ -1243,7 +1269,7 @@ const findQuotationForUser = async (req, res) => {
     ? { $or: [{ _id: id }, { generatedId: id }] }
     : { generatedId: id };
 
-  const quotation = await Quotation.findOne(query).lean();
+  let quotation = await Quotation.findOne(query).lean();
   if (!quotation) {
     res.status(404).json({ message: "Quotation not found" });
     return null;
@@ -1259,7 +1285,7 @@ const findQuotationForUser = async (req, res) => {
     return null;
   }
 
-  return quotation;
+  return hydrateQuotationItems(quotation);
 };
 
 const generateBomPdf = async (req, res) => {

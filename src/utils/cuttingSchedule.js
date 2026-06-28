@@ -21,6 +21,8 @@ const round3 = (value) => {
 };
 
 const normalizeCode = (value) => String(value || "").trim().toUpperCase();
+const catalogProductKey = (line = {}) =>
+  `${line.itemType === "hardware" ? "hardware" : line.itemType === "glass" ? "glass" : "profile"}:${normalizeCode(line.sapCode || line.description)}`;
 
 const getMapValue = (mapLike, key) => {
   if (!mapLike || !key) return undefined;
@@ -99,6 +101,46 @@ const resolveCatalogProduct = async (line) => {
   }
 
   return findProfileProductBySapCode(line.sapCode);
+};
+
+const resolveCatalogProducts = async (lines = []) => {
+  const profileCodes = new Set();
+  const hardwareCodes = new Set();
+  const products = new Map();
+
+  lines.forEach((line) => {
+    const code = String(line?.sapCode || "").trim();
+    if (!code) return;
+    if (line.itemType === "hardware") hardwareCodes.add(code);
+    else if (line.itemType !== "glass") profileCodes.add(code);
+  });
+
+  const [profiles, hardware] = await Promise.all([
+    profileCodes.size
+      ? Product.find({ sapCode: { $in: Array.from(profileCodes) }, enabled: true }).lean()
+      : [],
+    hardwareCodes.size
+      ? HardwareOptions.find({ sapCode: { $in: Array.from(hardwareCodes) } })
+          .collation({ locale: "en", strength: 2 })
+          .lean()
+      : [],
+  ]);
+
+  profiles.forEach((product) => {
+    products.set(catalogProductKey({ itemType: "profile", sapCode: product.sapCode }), {
+      ...product,
+      itemType: "profile",
+      label: product.description || product.part || product.sapCode,
+    });
+  });
+  hardware.forEach((product) => {
+    products.set(catalogProductKey({ itemType: "hardware", sapCode: product.sapCode }), {
+      ...product,
+      label: product.perticular || product.sapCode,
+    });
+  });
+
+  return products;
 };
 
 const searchProfileProductsBySapCode = async (sapCode, limit = 10) => {
@@ -181,10 +223,12 @@ const listProfileProducts = async () => {
 };
 
 module.exports = {
+  catalogProductKey,
   escapeHtml,
   evaluateFormula,
   listProfileProducts,
   resolveCatalogProduct,
+  resolveCatalogProducts,
   round3,
   searchCatalogProducts,
   toNumber,
