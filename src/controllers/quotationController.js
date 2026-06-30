@@ -1393,6 +1393,11 @@ function renderSummaryPage(data) {
         </tr>
       `
     : "";
+    const showItemsSubtotal =
+  additionalCosts.showInstallation ||
+  additionalCosts.showTransport ||
+  additionalCosts.showLoadingUnloading ||
+  toNumber(data.totals.discountValue) > 0;
 
   return `
     <section class="page">
@@ -1435,10 +1440,15 @@ function renderSummaryPage(data) {
         ${installationRow}
         ${transportRow}
         ${loadingUnloadingRow}
-        <tr>
-          <td>Items Subtotal</td>
-          <td>${formatCurrency(data.totals.itemsSubtotal)} INR</td>
-        </tr>
+        ${showItemsSubtotal
+  ? `
+      <tr>
+        <td>Items Subtotal</td>
+        <td>${formatCurrency(data.totals.itemsSubtotal)} INR</td>
+      </tr>
+    `
+  : ""
+}
         ${discountRow}
         <tr>
           <td>Total Project Cost</td>
