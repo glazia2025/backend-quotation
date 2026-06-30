@@ -1,0 +1,21 @@
+{
+  "Rules": [
+    {
+      "ID": "cleanup-quotation-cache-versions",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "quotations/"
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 7,
+        "NewerNoncurrentVersions": 2
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      }
+    }
+  ]
+}

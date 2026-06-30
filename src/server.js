@@ -5,6 +5,11 @@ const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../prod.env") });
 
 const connectDB = require("./db");
+const { shutdownPdfBrowser } = require("./utils/pdfBrowser");
+const {
+  startPdfGenerationWorker,
+  stopPdfGenerationWorker,
+} = require("./utils/pdfWarmup");
 
 const app = express();
 const PORT = process.env.PORT || 5556;
@@ -47,8 +52,6 @@ app.use(
 // even though the resulting MongoDB documents are now stored separately.
 app.use(express.json({ extended: false, limit: "50mb" }));
 
-connectDB();
-
 const quotationRoutes = require("./routes/quotationRoutes");
 const quotationAdminRoutes = require("./routes/quotationAdminRoutes");
 const userQuotationDataRoutes = require("./routes/userQuotationDataRoutes");
@@ -65,6 +68,30 @@ app.get("/health", (req, res) => {
   res.json({ service: "backend-quotation", ok: true });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Glazia quotation backend running on http://localhost:${PORT}`);
+let server;
+
+const startServer = async () => {
+  await connectDB();
+  await startPdfGenerationWorker();
+  server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Glazia quotation backend running on http://localhost:${PORT}`);
+  });
+};
+
+const shutdown = async (signal) => {
+  console.log(`${signal} received; shutting down quotation backend`);
+  if (server) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+  await stopPdfGenerationWorker().catch(() => {});
+  await shutdownPdfBrowser().catch(() => {});
+  process.exit(0);
+};
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+
+startServer().catch((error) => {
+  console.error("Failed to start quotation backend:", error);
+  process.exit(1);
 });

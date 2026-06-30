@@ -9,6 +9,7 @@ const Series = require("../models/Quotation/Series");
 const User = require("../models/User");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
+const { getOrGeneratePdf } = require("../utils/pdfCache");
 const { restoreRateMap } = require("../utils/rateMapUtils");
 const { hydrateQuotationItems } = require("../utils/quotationItems");
 const {
@@ -1201,16 +1202,35 @@ const buildBomPdfHtml = (data) => {
   `;
 };
 
-const generateCuttingSchedulePdf = async (req, res) => {
+const renderCuttingSchedulePdfBuffer = async (quotation) => {
   let browserHandle;
   let page;
+  try {
+    const data = await buildScheduleData(quotation);
+    const html = buildPdfHtml(data);
+    browserHandle = await launchPdfBrowser();
+    page = await browserHandle.browser.newPage();
+    await setPdfContent(page, html);
+    return await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" },
+      preferCSSPageSize: true,
+    });
+  } finally {
+    if (page && !page.isClosed()) await page.close();
+    await closePdfBrowser(browserHandle);
+  }
+};
+
+const generateCuttingSchedulePdf = async (req, res) => {
   try {
     const { id } = req.params;
     const query = mongoose.Types.ObjectId.isValid(id)
       ? { $or: [{ _id: id }, { generatedId: id }] }
       : { generatedId: id };
 
-    let quotation = await Quotation.findOne(query).lean();
+    const quotation = await Quotation.findOne(query).lean();
     if (!quotation) return res.status(404).json({ message: "Quotation not found" });
 
     if (
@@ -1222,26 +1242,19 @@ const generateCuttingSchedulePdf = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    quotation = await hydrateQuotationItems(quotation);
-
-    const data = await buildScheduleData(quotation);
-    const html = buildPdfHtml(data);
-
-    browserHandle = await launchPdfBrowser();
-    const { browser } = browserHandle;
-    page = await browser.newPage();
-    await setPdfContent(page, html);
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: { top: "8mm", right: "8mm", bottom: "8mm", left: "8mm" },
-      preferCSSPageSize: true,
+    const { buffer: pdfBuffer, cacheStatus } = await getOrGeneratePdf({
+      quotation,
+      type: "cutting-schedule",
+      generate: async () =>
+        renderCuttingSchedulePdfBuffer(await hydrateQuotationItems(quotation)),
     });
 
-    const fileName = `${data.projectCode || "quotation"}-cutting-schedule.pdf`;
+    const projectCode = quotation.generatedId || quotation.quotationDetails?.id || String(quotation._id);
+    const fileName = `${projectCode || "quotation"}-cutting-schedule.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("X-PDF-Cache", cacheStatus);
     return res.end(pdfBuffer);
   } catch (error) {
     console.error("generateCuttingSchedulePdf error", error);
@@ -1252,18 +1265,10 @@ const generateCuttingSchedulePdf = async (req, res) => {
       });
     }
     res.status(500).json({ message: "Failed to generate cutting schedule PDF", error: error.message });
-  } finally {
-    try {
-      if (page && !page.isClosed()) {
-        await page.close();
-      }
-    } finally {
-      await closePdfBrowser(browserHandle);
-    }
   }
 };
 
-const findQuotationForUser = async (req, res) => {
+const findQuotationForUser = async (req, res, hydrate = true) => {
   const { id } = req.params;
   const query = mongoose.Types.ObjectId.isValid(id)
     ? { $or: [{ _id: id }, { generatedId: id }] }
@@ -1285,34 +1290,47 @@ const findQuotationForUser = async (req, res) => {
     return null;
   }
 
-  return hydrateQuotationItems(quotation);
+  return hydrate ? hydrateQuotationItems(quotation) : quotation;
 };
 
-const generateBomPdf = async (req, res) => {
+const renderBomPdfBuffer = async (quotation) => {
   let browserHandle;
   let page;
   try {
-    const quotation = await findQuotationForUser(req, res);
-    if (!quotation) return null;
-
     const data = await buildBomData(quotation);
     const html = buildBomPdfHtml(data);
-
     browserHandle = await launchPdfBrowser();
-    const { browser } = browserHandle;
-    page = await browser.newPage();
+    page = await browserHandle.browser.newPage();
     await setPdfContent(page, html);
-    const pdfBuffer = await page.pdf({
+    return await page.pdf({
       format: "A4",
       printBackground: true,
       margin: { top: "7.62mm", right: "7.62mm", bottom: "7.62mm", left: "7.62mm" },
       preferCSSPageSize: true,
     });
+  } finally {
+    if (page && !page.isClosed()) await page.close();
+    await closePdfBrowser(browserHandle);
+  }
+};
 
-    const fileName = `${data.projectCode || "quotation"}-bom.pdf`;
+const generateBomPdf = async (req, res) => {
+  try {
+    const quotation = await findQuotationForUser(req, res, false);
+    if (!quotation) return null;
+
+    const { buffer: pdfBuffer, cacheStatus } = await getOrGeneratePdf({
+      quotation,
+      type: "bom",
+      generate: async () => renderBomPdfBuffer(await hydrateQuotationItems(quotation)),
+    });
+
+    const projectCode = quotation.generatedId || quotation.quotationDetails?.id || String(quotation._id);
+    const fileName = `${projectCode || "quotation"}-bom.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("X-PDF-Cache", cacheStatus);
     return res.end(pdfBuffer);
   } catch (error) {
     console.error("generateBomPdf error", error);
@@ -1324,14 +1342,6 @@ const generateBomPdf = async (req, res) => {
     }
     res.status(500).json({ message: "Failed to generate BOM PDF", error: error.message });
     return null;
-  } finally {
-    try {
-      if (page && !page.isClosed()) {
-        await page.close();
-      }
-    } finally {
-      await closePdfBrowser(browserHandle);
-    }
   }
 };
 
@@ -1340,6 +1350,8 @@ module.exports = {
   getBeadingCatalog,
   generateBomPdf,
   generateCuttingSchedulePdf,
+  renderBomPdfBuffer,
+  renderCuttingSchedulePdfBuffer,
   getConfig,
   getDescriptionCatalog,
   listConfigs,
