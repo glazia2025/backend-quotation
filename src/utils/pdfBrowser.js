@@ -226,6 +226,25 @@ const setPdfContent = async (page, html) => {
     waitUntil: ["domcontentloaded", "load"],
     timeout: PDF_CONTENT_TIMEOUT_MS,
   });
+  const failedImages = await page.evaluate(async () => {
+    const images = Array.from(document.images);
+    await Promise.all(
+      images.map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise((resolve) => {
+              img.addEventListener("load", resolve, { once: true });
+              img.addEventListener("error", resolve, { once: true });
+            })
+      )
+    );
+    return images
+      .filter((img) => !img.complete || img.naturalWidth === 0)
+      .map((img) => img.currentSrc || img.src || img.alt || "unknown image");
+  });
+  if (failedImages.length > 0) {
+    throw new Error(`PDF image failed to load: ${failedImages.join(", ")}`);
+  }
 };
 
 const closePdfBrowser = async (handle) => {

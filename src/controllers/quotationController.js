@@ -29,6 +29,7 @@ const {
   collectQuotationImageKeys,
   deleteQuotationImages,
   deleteS3Keys,
+  inlineQuotationImages,
   uploadQuotationImages,
 } = require("../utils/quotationImages");
 
@@ -2114,7 +2115,9 @@ const renderQuotationPdfBuffer = async (quotation, user) => {
   let page;
 
   try {
-    const preparedData = prepareQuotationPdfData(quotation);
+    const preparedData = prepareQuotationPdfData(
+      await inlineQuotationImages(quotation)
+    );
     const html = buildPdfHtml(preparedData, user);
     browserHandle = await launchPdfBrowser();
     page = await browserHandle.browser.newPage();
@@ -2230,7 +2233,9 @@ const generateElevationPdfController = async (req, res) => {
     quotation = await hydrateQuotationItems(quotation);
 
     //  SAME DATA (important)
-    const preparedData = prepareQuotationPdfData(quotation);
+    const preparedData = prepareQuotationPdfData(
+      await inlineQuotationImages(quotation)
+    );
 
     //  DIFFERENCE → new HTML
     const html = buildElevationHtml(preparedData);

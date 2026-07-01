@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const {
   DeleteObjectsCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -81,6 +82,71 @@ const normalizeQuotationImageReferences = (quotation = {}) => ({
       }))
     : quotation.items,
 });
+
+const s3ImageToDataUrl = async (value) => {
+  const key = publicUrlToKey(value);
+  if (!key) return value || "";
+
+  assertConfigured();
+  const response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: QUOTATION_S3_BUCKET,
+      Key: key,
+    })
+  );
+  const body = Buffer.from(await response.Body.transformToByteArray());
+  if (!body.length) {
+    throw new Error(`Quotation image ${key} is empty`);
+  }
+  const contentType = response.ContentType || "image/png";
+  return `data:${contentType};base64,${body.toString("base64")}`;
+};
+
+async function inlineQuotationImages(quotation = {}) {
+  const nextQuotation = {
+    ...quotation,
+    globalConfig: quotation.globalConfig
+      ? { ...quotation.globalConfig }
+      : quotation.globalConfig,
+    items: Array.isArray(quotation.items)
+      ? quotation.items.map((item) => ({
+          ...item,
+          subItems: Array.isArray(item?.subItems)
+            ? item.subItems.map((subItem) => ({ ...subItem }))
+            : item?.subItems,
+        }))
+      : quotation.items,
+  };
+
+  const tasks = [];
+  if (nextQuotation.globalConfig?.logo) {
+    tasks.push(
+      s3ImageToDataUrl(nextQuotation.globalConfig.logo).then((value) => {
+        nextQuotation.globalConfig.logo = value;
+      })
+    );
+  }
+  (nextQuotation.items || []).forEach((item) => {
+    if (item?.refImage) {
+      tasks.push(
+        s3ImageToDataUrl(item.refImage).then((value) => {
+          item.refImage = value;
+        })
+      );
+    }
+    (item?.subItems || []).forEach((subItem) => {
+      if (!subItem?.refImage) return;
+      tasks.push(
+        s3ImageToDataUrl(subItem.refImage).then((value) => {
+          subItem.refImage = value;
+        })
+      );
+    });
+  });
+
+  await Promise.all(tasks);
+  return nextQuotation;
+}
 
 const collectQuotationImageKeys = ({ items = [], globalConfig = {} } = {}) => {
   const values = [globalConfig?.logo];
@@ -273,5 +339,6 @@ module.exports = {
   deleteS3Keys,
   normalizeQuotationImageReferences,
   normalizeQuotationImageUrl,
+  inlineQuotationImages,
   uploadQuotationImages,
 };

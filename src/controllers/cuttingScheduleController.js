@@ -12,6 +12,7 @@ const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/p
 const { getOrGeneratePdf } = require("../utils/pdfCache");
 const { restoreRateMap } = require("../utils/rateMapUtils");
 const { hydrateQuotationItems } = require("../utils/quotationItems");
+const { inlineQuotationImages } = require("../utils/quotationImages");
 const {
   catalogProductKey,
   escapeHtml,
@@ -1206,7 +1207,7 @@ const renderCuttingSchedulePdfBuffer = async (quotation) => {
   let browserHandle;
   let page;
   try {
-    const data = await buildScheduleData(quotation);
+    const data = await buildScheduleData(await inlineQuotationImages(quotation));
     const html = buildPdfHtml(data);
     browserHandle = await launchPdfBrowser();
     page = await browserHandle.browser.newPage();
@@ -1297,7 +1298,7 @@ const renderBomPdfBuffer = async (quotation) => {
   let browserHandle;
   let page;
   try {
-    const data = await buildBomData(quotation);
+    const data = await buildBomData(await inlineQuotationImages(quotation));
     const html = buildBomPdfHtml(data);
     browserHandle = await launchPdfBrowser();
     page = await browserHandle.browser.newPage();
