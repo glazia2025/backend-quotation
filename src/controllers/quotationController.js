@@ -635,17 +635,18 @@ const updateQuotationById = async (req, res) => {
 
     const {
       breakdown,
-      items = [],
+      items,
       customerDetails = {},
       quotationDetails = {},
       globalConfig = {},
     } = req.body;
+    const shouldReplaceItems = Array.isArray(items);
     const existingHydratedQuotation = await hydrateQuotationItems(quotation);
     const previousImageKeys = collectQuotationImageKeys(existingHydratedQuotation);
 
     const prepared = await uploadQuotationImages({
       quotationId: quotation._id,
-      items,
+      items: shouldReplaceItems ? items : [],
       globalConfig,
     });
     const { topLevelIds, allIds } = await createQuotationItems(
@@ -661,7 +662,7 @@ const updateQuotationById = async (req, res) => {
         req.params.id,
         {
           $set: {
-            quotationItems: topLevelIds,
+            ...(shouldReplaceItems ? { quotationItems: topLevelIds } : {}),
             customerDetails,
             quotationDetails,
             globalConfig: prepared.globalConfig,
@@ -679,10 +680,12 @@ const updateQuotationById = async (req, res) => {
       throw error;
     }
 
-    await deleteQuotationItems(
-      quotation._id,
-      allIds.length > 0 ? { _id: { $nin: allIds } } : {}
-    );
+    if (shouldReplaceItems) {
+      await deleteQuotationItems(
+        quotation._id,
+        allIds.length > 0 ? { _id: { $nin: allIds } } : {}
+      );
+    }
 
     const hydratedUpdatedQuotation = await hydrateQuotationItems(updatedQuotation);
     const currentImageKeys = new Set(

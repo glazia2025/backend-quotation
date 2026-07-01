@@ -21,6 +21,12 @@ const {
   generateBomPdf,
   generateCuttingSchedulePdf,
 } = require("../controllers/cuttingScheduleController");
+const {
+  createQuotationItem,
+  deleteQuotationItem,
+  reorderQuotationItems,
+  updateQuotationItem,
+} = require("../controllers/quotationItemController");
 
 const {
   getQuotationConfig,
@@ -53,6 +59,10 @@ router.get("/", isUser, listQuotations);
 router.get("/config", isUser, getQuotationConfig);
 router.post("/config", isUser, createOrUpdateQuotationConfig);
 
+router.post("/:id/items", isUser, createQuotationItem);
+router.patch("/:id/items/reorder", isUser, reorderQuotationItems);
+router.patch("/:id/items/:itemId", isUser, updateQuotationItem);
+router.delete("/:id/items/:itemId", isUser, deleteQuotationItem);
 router.get("/:id", isUser, getQuotationById);
 router.post("/:id", isUser, updateQuotationById);
 router.delete("/:id", isUser, deleteQuotationById);
