@@ -45,6 +45,14 @@ const {
   upsertConfig: upsertCuttingScheduleConfig,
 } = require("../controllers/cuttingScheduleController");
 
+const {
+  deleteConfig: deleteGlassBeadingConfig,
+  getConfig: getGlassBeadingConfig,
+  getDescriptionCatalog: getGlassBeadingDescriptionCatalog,
+  listConfigs: listGlassBeadingConfigs,
+  upsertConfig: upsertGlassBeadingConfig,
+} = require("../controllers/glassBeadingController");
+
 // Systems
 router.post("/systems", isAdmin, createSystem);
 router.get("/systems", isAdmin, listSystems);
@@ -95,6 +103,37 @@ router.post("/cutting-schedule/configs", isAdmin, upsertCuttingScheduleConfig);
 router.delete("/cutting-schedule/configs/:id", isAdmin, deleteCuttingScheduleConfig);
 router.get("/cutting-schedule/catalog", isAdmin, searchCuttingScheduleCatalog);
 router.get("/cutting-schedule/beading-catalog", isAdmin, getBeadingCatalog);
+
+// Glass beading rules
+router.get(
+  "/glass-beading/descriptions",
+  isAdmin,
+  getGlassBeadingDescriptionCatalog
+);
+
+router.get(
+  "/glass-beading/configs",
+  isAdmin,
+  listGlassBeadingConfigs
+);
+
+router.get(
+  "/glass-beading/configs/:id",
+  isAdmin,
+  getGlassBeadingConfig
+);
+
+router.post(
+  "/glass-beading/configs",
+  isAdmin,
+  upsertGlassBeadingConfig
+);
+
+router.delete(
+  "/glass-beading/configs/:id",
+  isAdmin,
+  deleteGlassBeadingConfig
+);
 
 router.get(
   "/",
