@@ -6,6 +6,11 @@ const beadingSchema=new mongoose.Schema(
             trim:true,
             default:"",
         },
+         description:{
+        type:String,
+        trim:true,
+        default:"",
+    },
         formula:{
             type:String,
             trim:true,
@@ -27,6 +32,11 @@ const gasketSchema = new mongoose.Schema(
             trim:true,
             default:"",
         },
+         description:{
+        type:String,
+        trim:true,
+        default:"",
+    },
         formula:{
             type:String,
             trim:true,

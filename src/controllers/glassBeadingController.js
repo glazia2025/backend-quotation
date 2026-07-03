@@ -82,6 +82,7 @@ const getConfig = async (req, res) => {
 const normalizeBeadings = (beadings = []) =>
   (Array.isArray(beadings) ? beadings : []).map((beading) => ({
     sapCode: String(beading.sapCode || "").trim(),
+    description: String(beading.description || "").trim(),
     formula: String(beading.formula || "").trim(),
     quantity: Number(beading.quantity) || 1,
   })).filter((beading) => beading.sapCode);
@@ -90,6 +91,7 @@ const normalizeBeadings = (beadings = []) =>
   const normalizeGaskets = (gaskets = []) =>
   (Array.isArray(gaskets) ? gaskets : []).map((gasket) => ({
     sapCode: String(gasket.sapCode || "").trim(),
+    description: String(gasket.description || "").trim(),
     formula: String(gasket.formula || "").trim(),
   })) .filter((gasket) => gasket.sapCode);
 
