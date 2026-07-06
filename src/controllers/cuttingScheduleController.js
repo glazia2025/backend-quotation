@@ -3,8 +3,10 @@ const fs = require("fs");
 const path = require("path");
 
 const CuttingScheduleConfig = require("../models/Quotation/CuttingScheduleConfig");
+const GlassBeadingConfig = require("../models/Quotation/GlassBeadingConfig");
 const OptionSet = require("../models/Quotation/OptionSet");
 const Quotation = require("../models/Quotation/Quotation");
+const ProfileOption = require("../models/ProfileOptions");
 const Series = require("../models/Quotation/Series");
 const User = require("../models/User");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
@@ -331,15 +333,28 @@ const uniqueConfigKeys = (items) =>
     ).values()
   );
 
-const configCatalogLines = (configs) =>
-  configs.flatMap((config) => [
+const configCatalogLines = (configs, glassBeadingConfigs) => [
+  ...configs.flatMap((config) => [
     ...(config.lines || []),
     ...(config.schedules || []).flatMap((schedule) => schedule.lines || []),
     ...(config.glassBeadingLinks || []).map((link) => ({
       itemType: "profile",
       sapCode: link.beadingSapCode,
     })),
-  ]);
+  ]),
+  ...glassBeadingConfigs.flatMap((config) => [
+    ...(config.beadings || []).map((beading) => ({
+      itemType: "profile",
+      sapCode: beading.sapCode,
+    })),
+
+    ...(config.gaskets || []).map((gasket) => ({
+      itemType: "profile",
+      sapCode: gasket.sapCode,
+    })),
+  ]),
+];
+
 
 const findLinkedBeading = (links = [], glassSpec = "") => {
   const selectedGlass = String(glassSpec || "").trim();
@@ -491,6 +506,25 @@ const getProfileAdjustment = (product, context) => {
     categoryName,
   ]);
 };
+const getProfileRateBySapCode = (profileOption, sapCode) => {
+  const categories = profileOption?.categories || {};
+
+  for (const [, category] of Object.entries(categories)) {
+    const products = category.products || {};
+
+    for (const [optionName, productList] of Object.entries(products)) {
+      const found = (productList || []).find(
+        (p) => String(p.sapCode) === String(sapCode)
+      );
+
+      if (found) {
+        return Number(category.rate?.[optionName] || 0);
+      }
+    }
+  }
+
+  return 0;
+};
 
 const getHardwareAdjustment = (product, context) =>
   getDynamicAdjustment(context.dynamicPricing.hardware, [product?.subCategory]);
@@ -522,18 +556,29 @@ const buildBomData = async (quotation) => {
   const sourceItems = itemRowsForSchedule(quotation);
   const keys = uniqueConfigKeys(sourceItems);
 
-  const [configs, pricingContext] = await Promise.all([
+  const [configs, glassBeadingConfigs, pricingContext, profileOption] = await Promise.all([
     CuttingScheduleConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
     }).lean(),
+    GlassBeadingConfig.find({
+      $or: keys.length ? keys : [{ systemType: "__none__" }],
+    }).lean(),
     getUserPricingContext(quotation.user),
+    ProfileOption.findOne().lean(),
   ]);
 
   const configMap = configs.reduce((acc, config) => {
     acc[`${config.systemType}||${config.series}||${config.description}`] = config;
     return acc;
   }, {});
-  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs));
+
+  const glassBeadingConfigMap = glassBeadingConfigs.reduce((acc, config) => {
+    const key = `${config.systemType}||${config.series}||${config.description}||${config.glassSpec}`;
+
+    acc[key] = config;
+    return acc;
+  }, {});
+  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs, glassBeadingConfigs));
 
   const groups = new Map();
   const notes = [];
@@ -551,6 +596,12 @@ const buildBomData = async (quotation) => {
       Q: itemQuantity,
       AREA: toNumber(item.area),
     };
+    const glassSpec = String(item.glassSpec || "").trim();
+
+    const glassBeadingConfig =
+      glassBeadingConfigMap[
+      `${item.systemType}||${item.series}||${item.description}||${glassSpec}`
+      ];
 
     for (const line of schedule.lines) {
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
@@ -630,7 +681,6 @@ const buildBomData = async (quotation) => {
           rate: glassRate,
           amount: glassRate * glassArea,
         });
-
         const beadingLine = {
           itemType: "profile",
           sapCode: linkedBeading.beadingSapCode,
@@ -655,8 +705,79 @@ const buildBomData = async (quotation) => {
         });
       }
     }
-  }
+    if (glassBeadingConfig) {
+      (glassBeadingConfig.beadings || []).forEach((beading) => {
+        const beadingProduct = catalogProducts.get(
+          catalogProductKey({
+            itemType: "profile",
+            sapCode: beading.sapCode,
+          })
+        );
+        const beadingRate = getProfileRateBySapCode(
+          profileOption,
+          beading.sapCode
+        );
 
+        const requiredLength = toNumber(
+          evaluateFormula(beading.formula, variables)
+        );
+        const stockLength = toNumber(beadingProduct?.length);
+
+        const beadingQty =
+          stockLength > 0
+            ? Math.ceil(stockLength / requiredLength)
+            : 0;
+        const beadingAmount = round2(beadingQty * beadingRate);
+        addBomRow(groups, {
+          type: "Beading",
+          description: beading.description,
+          itemCode: beading.sapCode,
+          quantity: beadingQty,
+          unit: "sqft",
+          measureLabel: `${round3(requiredLength)} mm`,
+          rate: beadingRate,
+          amount: beadingAmount,
+        });
+      });
+    }
+    if (glassBeadingConfig) {
+      (glassBeadingConfig.gaskets || []).forEach((gasket) => {
+        const gasketProduct = catalogProducts.get(
+          catalogProductKey({
+            itemType: "profile",
+            sapCode: gasket.sapCode,
+          })
+        );
+        const gasketRate = getProfileRateBySapCode(
+          profileOption,
+          gasket.sapCode
+        );
+
+        const requiredLength = toNumber(
+          evaluateFormula(gasket.formula, variables)
+        );
+
+        const stockLength = toNumber(gasketProduct?.length);
+
+        const gasketQty =
+          stockLength > 0
+            ? Math.ceil(stockLength / requiredLength)
+            : 0;
+        const gasketAmount = round2(gasketQty * gasketRate);
+
+        addBomRow(groups, {
+          type: "Gasket",
+          description: gasket.description,
+          itemCode: gasket.sapCode,
+          quantity: gasketQty,
+          unit: "sqft",
+          measureLabel: `${round3(requiredLength)} mm`,
+          rate: gasketRate,
+          amount: gasketAmount,
+        });
+      });
+    }
+  }
   const rows = Array.from(groups.values()).sort((a, b) =>
     `${a.type} ${a.description} ${a.itemCode}`.localeCompare(
       `${b.type} ${b.description} ${b.itemCode}`
@@ -669,7 +790,7 @@ const buildBomData = async (quotation) => {
       acc.grand = round2(acc.grand + row.amount);
       return acc;
     },
-    { Profile: 0, Hardware: 0, Glass: 0, grand: 0 }
+    { Profile: 0, Hardware: 0, Glass: 0, Beading: 0, Gasket: 0, grand: 0 }
   );
 
   return {
@@ -693,11 +814,21 @@ const buildScheduleData = async (quotation) => {
     $or: keys.length ? keys : [{ systemType: "__none__" }],
   }).lean();
 
+  const glassBeadingConfigs = await GlassBeadingConfig.find({
+    $or: keys.length ? keys : [{ systemType: "__none__" }],
+  }).lean();
+
   const configMap = configs.reduce((acc, config) => {
     acc[`${config.systemType}||${config.series}||${config.description}`] = config;
     return acc;
   }, {});
-  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs));
+  const glassBeadingConfigMap = glassBeadingConfigs.reduce((acc, config) => {
+    const key = `${config.systemType}||${config.series}||${config.description}||${config.glassSpec}`;
+
+    acc[key] = config;
+    return acc;
+  }, {});
+  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs, glassBeadingConfigs));
 
   const sections = [];
   for (const item of sourceItems) {
@@ -712,6 +843,8 @@ const buildScheduleData = async (quotation) => {
       AREA: toNumber(item.area),
     };
     const rows = [];
+    const beadingRows = [];
+    const gasketRows = [];
     const notes = [];
 
     for (const line of schedule?.lines || []) {
@@ -736,6 +869,12 @@ const buildScheduleData = async (quotation) => {
       const glassSpec = String(item.glassSpec || "").trim();
       const linkedBeading =
         line.itemType === "glass" ? findLinkedBeading(config?.glassBeadingLinks, glassSpec) : null;
+      const glassBeadingConfig =
+        line.itemType === "glass"
+          ? glassBeadingConfigMap[
+          `${item.systemType}||${item.series}||${item.description}||${glassSpec}`
+          ]
+          : null;
 
       // if (line.itemType === "glass" && !linkedBeading) {
       //   notes.push(`Beading not set for glass "${glassSpec || "-"}" by admin.`);
@@ -758,9 +897,73 @@ const buildScheduleData = async (quotation) => {
         sortOrder: line.sortOrder || 0,
         linkedBeading,
       });
-    }
+      if (line.itemType === "glass" && glassBeadingConfig && beadingRows.length === 0) {
+        (glassBeadingConfig.beadings || []).forEach((beading) => {
+          let beadingDimension = "";
 
-    const sortedRows = rows.sort((a, b) => a.sortOrder - b.sortOrder);
+          if (beading.formula) {
+            if (beading.formula.includes(",")) {
+              const [d1, d2] = beading.formula.split(",");
+
+              const val1 = evaluateFormula(d1.trim(), variables);
+              const val2 = evaluateFormula(d2.trim(), variables);
+
+              beadingDimension = `${val1} x ${val2}`;
+            } else {
+              beadingDimension = evaluateFormula(beading.formula, variables);
+            }
+          }
+
+          beadingRows.push({
+            itemType: "beading",
+            description: beading.description,
+            sapCode: beading.sapCode,
+            dimension: beadingDimension,
+            cutAngle: "",
+            quantity: beading.quantity,
+            unit: "sqft",
+            position: "--",
+            sortOrder: (line.sortOrder || 0) + 1,
+          });
+        });
+      }
+
+      if (line.itemType === "glass" && glassBeadingConfig && gasketRows.length === 0) {
+        (glassBeadingConfig.gaskets || []).forEach((gasket) => {
+          let gasketDimension = "";
+
+          if (gasket.formula) {
+            if (gasket.formula.includes(",")) {
+              const [d1, d2] = gasket.formula.split(",");
+
+              const val1 = evaluateFormula(d1.trim(), variables);
+              const val2 = evaluateFormula(d2.trim(), variables);
+
+              gasketDimension = `${val1} x ${val2}`;
+            } else {
+              gasketDimension = evaluateFormula(gasket.formula, variables);
+            }
+          }
+
+          gasketRows.push({
+            itemType: "gasket",
+            description: gasket.description,
+            sapCode: gasket.sapCode,
+            dimension: gasketDimension,
+            cutAngle: "",
+            quantity: 1,
+            unit: "sqft",
+            position: "--",
+            sortOrder: (line.sortOrder || 0) + 2,
+          });
+        });
+      }
+
+    }
+    rows.push(...beadingRows);
+    rows.push(...gasketRows);
+    // const sortedRows = rows.sort((a, b) => a.sortOrder - b.sortOrder);
+    const sortedRows = rows;
     if (!sortedRows.length && !notes.length) {
       continue;
     }
@@ -791,7 +994,17 @@ const renderRows = (rows) =>
       .map(
         (row) => `
         <tr>
-          <td>${escapeHtml(row.itemType === "profile" ? "Profile" : row.itemType === "glass" ? "Glass" : "Fabrication Hardware")}</td>
+          <td>${escapeHtml(
+          row.itemType === "profile"
+            ? "Profile"
+            : row.itemType === "glass"
+              ? "Glass"
+              : row.itemType === "beading"
+                ? "Beading"
+                : row.itemType === "gasket"
+                  ? "Gasket"
+                  : "Fabrication Hardware"
+        )}</td>
           <td>${escapeHtml(row.description)}</td>
            <td>${escapeHtml(row.itemType === "glass" ? "--" : row.sapCode)}</td> 
           <td class="num">${row.dimension === "" ? "" : escapeHtml(round3(row.dimension))}</td>
