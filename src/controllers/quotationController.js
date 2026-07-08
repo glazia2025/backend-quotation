@@ -442,14 +442,14 @@ const previewRate = async (req, res) => {
 
   // const amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
   let amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
-//  Arch charge
-if (
-  req.body.systemType?.toLowerCase() === "casement" &&
-  req.body.archType &&
-  req.body.archType !== "none"
-) {
-  amount += 5000;
-}
+  //  Arch charge
+  if (
+    req.body.systemType?.toLowerCase() === "casement" &&
+    req.body.archType &&
+    req.body.archType !== "none"
+  ) {
+    amount += 5000;
+  }
 
   res.json({
     rate: baseRate,
@@ -516,7 +516,7 @@ const createQuotation = async (req, res) => {
         Quotation.findByIdAndDelete(quotation._id),
       ]);
     }
-    await deleteS3Keys(uploadedKeys).catch(() => {});
+    await deleteS3Keys(uploadedKeys).catch(() => { });
     console.error("Error creating quotation:", error);
     res.status(error.statusCode || 500).json({
       message: error.message || "Error creating quotation",
@@ -653,7 +653,7 @@ const updateQuotationById = async (req, res) => {
       quotation._id,
       prepared.items
     ).catch(async (error) => {
-      await deleteS3Keys(prepared.uploadedKeys).catch(() => {});
+      await deleteS3Keys(prepared.uploadedKeys).catch(() => { });
       throw error;
     });
     let updatedQuotation;
@@ -676,7 +676,7 @@ const updateQuotationById = async (req, res) => {
       if (allIds.length > 0) {
         await QuotationItem.deleteMany({ _id: { $in: allIds } });
       }
-      await deleteS3Keys(prepared.uploadedKeys).catch(() => {});
+      await deleteS3Keys(prepared.uploadedKeys).catch(() => { });
       throw error;
     }
 
@@ -727,7 +727,7 @@ const deleteQuotationById = async (req, res) => {
     }
     await deleteQuotationItems(id);
     await Quotation.findByIdAndDelete(id);
-    await cancelPdfGeneration(id).catch(() => {});
+    await cancelPdfGeneration(id).catch(() => { });
     await deleteQuotationImages(id).catch((error) => {
       console.warn(`Failed to delete S3 images for quotation ${id}:`, error.message);
     });
@@ -811,15 +811,15 @@ function computeAmount(item) {
   const rate = toNumber(item?.rate);
   const quantity = toNumber(item?.quantity, 1);
   let amount = area * rate * quantity;
-//  Arch charge
-if (
-  item?.systemType?.toLowerCase() === "casement" &&
-  item?.archType &&
-  item.archType !== "none"
-) {
-  amount += 5000;
-}
-return Number(amount.toFixed(2));
+  //  Arch charge
+  if (
+    item?.systemType?.toLowerCase() === "casement" &&
+    item?.archType &&
+    item.archType !== "none"
+  ) {
+    amount += 5000;
+  }
+  return Number(amount.toFixed(2));
 }
 
 function addProfit(value, profitPercentage) {
@@ -843,7 +843,7 @@ function boolToDisplay(value) {
 
 function formatHandle(handleType, handleColor) {
   const type = safeString(handleType);
-  if (!type || type === "-") return "-";
+  if (!type || type === "-") return "NA";
 
   const color = safeString(handleColor);
   return color && color !== "-" ? `${type} / ${color}` : type;
@@ -1192,23 +1192,30 @@ function renderMainItemCard(item) {
           <td class="label">Size</td>
           <td>W = ${item.width || "-"} mm; H = ${item.height || "-"} mm</td>
           <td class="label">Color</td>
-          <td>${escapeHtml(item.colorFinish)}</td>
+           <td>${item.systemType === "Combination"
+      ? "NA" : escapeHtml(item.colorFinish)}</td>
         </tr>
         <tr>
           <td class="label">Product</td>
           <td>${escapeHtml(item.systemType)}</td>
           <td class="label">Handle</td>
-          <td>${escapeHtml(formatHandle(item.handleType, item.handleColor))}</td>
+           <td>${item.systemType === "Combination"
+      ? "NA" : escapeHtml(formatHandle(item.handleType, item.handleColor))}</td>
           <td class="label">Description</td>
-          <td>${escapeHtml(item.description)}</td>
+           <td>${item.systemType === "Combination"
+      ? "NA" : escapeHtml(item.description)}</td>
         </tr>
         <tr>
           <td class="label">Location</td>
-          <td>${escapeHtml(item.location)}</td>
+           <td>${escapeHtml(item.location)}</td>
           <td class="label">Glass</td>
-          <td>${escapeHtml(item.glassSpec)}</td>
+           <td>${item.systemType === "Combination"
+      ? "NA" : escapeHtml(item.glassSpec)}</td>
           <td class="label">Mesh</td>
-          <td>${escapeHtml(formatMesh(item.meshPresent, item.meshType))}</td>
+          <td>${item.systemType === "Combination"
+      ? "NA"
+      : escapeHtml(formatMesh(item.meshPresent, item.meshType))
+    }</td>
         </tr>
       </table>
 
@@ -1286,6 +1293,11 @@ function renderSubItemsTable(subItems) {
         </thead>
         <tbody>
           ${subItems
+      .filter(
+        (sub) =>
+          sub.systemType !== "Blank Area" &&
+          sub.description !== "Blank Area"
+      )
       .map((sub) => {
         const img = sub.refImage
           ? `<img src="${sub.refImage}" alt="${escapeHtml(sub.refCode)}" class="sub-thumb" />`
@@ -1397,11 +1409,11 @@ function renderSummaryPage(data) {
         </tr>
       `
     : "";
-    const showItemsSubtotal =
-  additionalCosts.showInstallation ||
-  additionalCosts.showTransport ||
-  additionalCosts.showLoadingUnloading ||
-  toNumber(data.totals.discountValue) > 0;
+  const showItemsSubtotal =
+    additionalCosts.showInstallation ||
+    additionalCosts.showTransport ||
+    additionalCosts.showLoadingUnloading ||
+    toNumber(data.totals.discountValue) > 0;
 
   return `
     <section class="page">
@@ -1445,14 +1457,14 @@ function renderSummaryPage(data) {
         ${transportRow}
         ${loadingUnloadingRow}
         ${showItemsSubtotal
-  ? `
+      ? `
       <tr>
         <td>Items Subtotal</td>
         <td>${formatCurrency(data.totals.itemsSubtotal)} INR</td>
       </tr>
     `
-  : ""
-}
+      : ""
+    }
         ${discountRow}
         <tr>
           <td>Total Project Cost</td>
