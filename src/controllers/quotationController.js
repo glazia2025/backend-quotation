@@ -1308,7 +1308,7 @@ function renderSubItemsTable(subItems) {
                   <td>${escapeHtml(sub.refCode)}</td>
                   <td>${img}</td>
                   <td>${escapeHtml(sub.systemType)}</td>
-                  <td>${escapeHtml(sub.series)}</td>
+                  <td>${sub.systemType === "Exhaust Fan"? "40 mm": escapeHtml(sub.series)}</td>
                   <td>${sub.width || "-"}</td>
                   <td>${sub.height || "-"}</td>
                   <td>${sub.area.toFixed(2)}</td>
