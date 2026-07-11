@@ -529,6 +529,103 @@ const getProfileRateBySapCode = (profileOption, sapCode) => {
 const getHardwareAdjustment = (product, context) =>
   getDynamicAdjustment(context.dynamicPricing.hardware, [product?.subCategory]);
 
+// function consumeProfileLength(
+//   sapCode,
+//   requiredLength,
+//   stockLength,
+//   leftoverBySap
+// ) {
+//   requiredLength = toNumber(requiredLength);
+//   stockLength = toNumber(stockLength);
+
+//   // Invalid values
+//   if (requiredLength <= 0 || stockLength <= 0) {
+//     return {
+//       profilesUsed: 0,
+//       leftover: leftoverBySap[sapCode] || 0,
+//     };
+//   }
+
+//   // Is SAP ka available leftover
+//   let available = leftoverBySap[sapCode] || 0;
+
+//   // Agar sirf leftover se kaam ho gaya
+//   if (available >= requiredLength) {
+//     leftoverBySap[sapCode] = available - requiredLength;
+
+//     return {
+//       profilesUsed: 0,
+//       leftover: leftoverBySap[sapCode],
+//     };
+//   }
+
+//   // Pehle leftover use karo
+//   requiredLength -= available;
+
+//   // Kitni nayi stock profiles lagenge
+//   const profilesUsed = Math.ceil(requiredLength / stockLength);
+
+//   // Last profile me kitna material use hua
+//   const usedInLastProfile = requiredLength % stockLength;
+
+//   // Last profile ka leftover
+//   leftoverBySap[sapCode] =
+//     usedInLastProfile === 0
+//       ? 0
+//       : stockLength - usedInLastProfile;
+
+//   return {
+//     profilesUsed,
+//     leftover: leftoverBySap[sapCode],
+//   };
+// }
+function consumeProfileLength(
+  sapCode,
+  requiredLength,
+  stockLength,
+  leftoverBySap
+) {
+  requiredLength = toNumber(requiredLength);
+  stockLength = toNumber(stockLength);
+
+  if (requiredLength <= 0 || stockLength <= 0) {
+    return {
+      profilesUsed: 0,
+      leftover: leftoverBySap[sapCode] || 0,
+    };
+  }
+
+  // Is SAP ka pehle se available leftover
+  let available = leftoverBySap[sapCode] || 0;
+
+  // Agar leftover  kaafi hai
+  if (available >= requiredLength) {
+    leftoverBySap[sapCode] = available - requiredLength;
+
+    return {
+      profilesUsed: 0,
+      leftover: leftoverBySap[sapCode],
+    };
+  }
+
+  // Pehle leftover use kar lo
+  requiredLength -= available;
+
+  // Ab kitni new stock profiles lagenge
+  const profilesUsed = Math.ceil(requiredLength / stockLength);
+
+  // Total stock length jo issue hui
+  const totalLengthTaken = profilesUsed * stockLength;
+
+  // Bacha hua material
+  leftoverBySap[sapCode] = totalLengthTaken - requiredLength;
+
+  return {
+    profilesUsed,
+    leftover: leftoverBySap[sapCode],
+  };
+}
+
 const addBomRow = (groups, row) => {
   const key = [
     row.type,
@@ -581,6 +678,7 @@ const buildBomData = async (quotation) => {
   const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs, glassBeadingConfigs));
 
   const groups = new Map();
+  const leftoverBySap = {};
   const notes = [];
 
   for (const item of sourceItems) {
@@ -623,16 +721,36 @@ const buildBomData = async (quotation) => {
       }
 
       if (line.itemType === "profile") {
+       
         const product = catalogProducts.get(catalogProductKey(line));
         const adjustment = getProfileAdjustment(product, pricingContext);
         const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
         const lengthMm = toNumber(dimension, toNumber(product?.length, 0));
-        const weightKg = round3(qty * (lengthMm / 1000) * toNumber(product?.kgm, 0));
+        // const weightKg = round3(qty * (lengthMm / 1000) * toNumber(product?.kgm, 0));
+        const requiredLength = qty * lengthMm;
+
+const stockLength = toNumber(product?.length);
+ const result = consumeProfileLength(
+  line.sapCode,
+  requiredLength,
+  stockLength,
+  leftoverBySap
+);
+ const weightKg = round3(result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm, 0));
+console.log({
+  sap: line.sapCode,
+  qty,
+  lengthMm,
+  stockLength,
+  requiredLength,
+  result,
+  leftover: leftoverBySap[line.sapCode],
+});
         addBomRow(groups, {
           type: "Profile",
           description: line.description || product?.label || line.sapCode,
           itemCode: line.sapCode,
-          quantity: qty,
+          quantity: result.profilesUsed,
           unit: "Pcs",
           measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
           rate,
@@ -723,10 +841,30 @@ const buildBomData = async (quotation) => {
         );
         const stockLength = toNumber(beadingProduct?.length);
 
-        const beadingQty =
-          stockLength > 0
-            ? Math.ceil(stockLength / requiredLength)
-            : 0;
+        // const beadingQty =
+        //   stockLength > 0
+        //     ? Math.ceil(stockLength / requiredLength)
+        //     : 0;
+        console.log("===== BEADING BEFORE =====");
+console.log({
+  sap: beading.sapCode,
+  requiredLength,
+  stockLength,
+  availableBefore: leftoverBySap[beading.sapCode] || 0,
+});
+        const { profilesUsed } = consumeProfileLength(
+  beading.sapCode,
+  requiredLength,
+  stockLength,
+  leftoverBySap
+);
+console.log({
+  sap: beading.sapCode,
+  profilesUsed,
+  availableAfter: leftoverBySap[beading.sapCode],
+});
+
+const beadingQty = profilesUsed;
         const beadingAmount = round2(beadingQty * beadingRate);
         addBomRow(groups, {
           type: "Beading",
@@ -759,11 +897,34 @@ const buildBomData = async (quotation) => {
 
         const stockLength = toNumber(gasketProduct?.length);
 
-        const gasketQty =
-          stockLength > 0
-            ? Math.ceil(stockLength / requiredLength)
-            : 0;
+        // const gasketQty =
+        //   stockLength > 0
+        //     ? Math.ceil(stockLength / requiredLength)
+        //     : 0;
+
+        console.log("========== GASKET ==========");
+console.log({
+  sap: gasket.sapCode,
+  requiredLength,
+  stockLength,
+  availableBefore: leftoverBySap[gasket.sapCode] || 0,
+});
+
+        const { profilesUsed } = consumeProfileLength(
+  gasket.sapCode,
+  requiredLength,
+  stockLength,
+  leftoverBySap
+);
+console.log({
+  sap: gasket.sapCode,
+  profilesUsed,
+  availableAfter: leftoverBySap[gasket.sapCode],
+});
+
+const gasketQty = profilesUsed;
         const gasketAmount = round2(gasketQty * gasketRate);
+
 
         addBomRow(groups, {
           type: "Gasket",
