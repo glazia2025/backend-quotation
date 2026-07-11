@@ -308,7 +308,7 @@ const itemRowsForSchedule = (quotation) => {
   const rows = [];
   (quotation.items || []).forEach((item) => {
     if (item.systemType === "Combination" && Array.isArray(item.subItems) && item.subItems.length) {
-      item.subItems.forEach((subItem) => rows.push({ ...subItem, parentRefCode: item.refCode }));
+      item.subItems.forEach((subItem) =>rows.push({...subItem,parentRefCode: item.refCode,refImage: subItem.refImage || item.refImage,}));
       return;
     }
     rows.push(item);
