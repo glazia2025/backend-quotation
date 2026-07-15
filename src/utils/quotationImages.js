@@ -226,7 +226,45 @@ async function mapWithConcurrency(values, limit, worker) {
 
 const uploadImage = async (quotationId, value, uploadedKeys) => {
   const parsed = parseImage(value);
-  if (!parsed) return value || "";
+  if (!parsed) {
+    const sourceKey = publicUrlToKey(value);
+    const destinationPrefix = quotationImagePrefix(quotationId);
+    if (!sourceKey || sourceKey.startsWith(destinationPrefix)) return value || "";
+
+    assertConfigured();
+    const response = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: QUOTATION_S3_BUCKET,
+        Key: sourceKey,
+      })
+    );
+    const body = Buffer.from(await response.Body.transformToByteArray());
+    if (!body.length) throw new Error(`Quotation image ${sourceKey} is empty`);
+    if (body.length > MAX_IMAGE_BYTES) {
+      const error = new Error(
+        `Quotation image exceeds ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB`
+      );
+      error.statusCode = 413;
+      throw error;
+    }
+
+    const contentType = response.ContentType || "image/png";
+    const sourceExtension = sourceKey.match(/\.([a-zA-Z0-9]{1,10})$/)?.[1];
+    const extension = extensionByMimeType[contentType] || sourceExtension || "img";
+    const key = `${destinationPrefix}${crypto.randomUUID()}.${extension}`;
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: QUOTATION_S3_BUCKET,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        CacheControl: "public, max-age=31536000, immutable",
+        ACL: "public-read",
+      })
+    );
+    uploadedKeys.push(key);
+    return buildPublicUrl(key);
+  }
 
   assertConfigured();
   const key = `${quotationImagePrefix(quotationId)}${crypto.randomUUID()}.${parsed.extension}`;
