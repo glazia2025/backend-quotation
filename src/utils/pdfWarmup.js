@@ -8,10 +8,25 @@ const User = require("../models/User");
 const { getOrGeneratePdf } = require("./pdfCache");
 const { hydrateQuotationItems } = require("./quotationItems");
 
-const WARMUP_DELAY_MS = Number(process.env.QUOTATION_PDF_WARMUP_DELAY_MS || 1200);
-const POLL_MS = Number(process.env.QUOTATION_PDF_WORKER_POLL_MS || 1000);
-const LEASE_MS = Number(process.env.QUOTATION_PDF_WORKER_LEASE_MS || 30000);
-const STALE_JOB_MS = Number(process.env.QUOTATION_PDF_JOB_STALE_MS || 10 * 60 * 1000);
+function readDurationMs(name, fallback, { allowZero = false } = {}) {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue.trim() === "") return fallback;
+
+  const value = Number(rawValue);
+  if (Number.isFinite(value) && (allowZero ? value >= 0 : value > 0)) {
+    return value;
+  }
+
+  console.warn(`${name} must be a ${allowZero ? "non-negative" : "positive"} number of milliseconds; using ${fallback}`);
+  return fallback;
+}
+
+const WARMUP_DELAY_MS = readDurationMs("QUOTATION_PDF_WARMUP_DELAY_MS", 1200, {
+  allowZero: true,
+});
+const POLL_MS = readDurationMs("QUOTATION_PDF_WORKER_POLL_MS", 1000);
+const LEASE_MS = readDurationMs("QUOTATION_PDF_WORKER_LEASE_MS", 30000);
+const STALE_JOB_MS = readDurationMs("QUOTATION_PDF_JOB_STALE_MS", 10 * 60 * 1000);
 const instanceId = `${process.pid}-${crypto.randomUUID()}`;
 const timers = new Map();
 let workerInterval = null;
