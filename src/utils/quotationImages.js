@@ -83,6 +83,12 @@ const normalizeQuotationImageReferences = (quotation = {}) => ({
     : quotation.items,
 });
 
+const isMissingS3ObjectError = (error) =>
+  error?.name === "NoSuchKey" ||
+  error?.Code === "NoSuchKey" ||
+  error?.code === "NoSuchKey" ||
+  error?.$metadata?.httpStatusCode === 404;
+
 const s3ImageToDataUrl = async (value) => {
   const key = publicUrlToKey(value);
   if (!key) return value || "";
@@ -121,9 +127,15 @@ async function inlineQuotationImages(quotation = {}) {
   const tasks = [];
   if (nextQuotation.globalConfig?.logo) {
     tasks.push(
-      s3ImageToDataUrl(nextQuotation.globalConfig.logo).then((value) => {
-        nextQuotation.globalConfig.logo = value;
-      })
+      s3ImageToDataUrl(nextQuotation.globalConfig.logo)
+        .then((value) => {
+          nextQuotation.globalConfig.logo = value;
+        })
+        .catch((error) => {
+          if (!isMissingS3ObjectError(error)) throw error;
+          console.warn("Quotation logo is missing from S3; rendering PDF without it");
+          nextQuotation.globalConfig.logo = "";
+        })
     );
   }
   (nextQuotation.items || []).forEach((item) => {
@@ -306,7 +318,15 @@ async function uploadQuotationImages({ quotationId, items = [], globalConfig = {
     uploadedValues = await mapWithConcurrency(
       tasks,
       UPLOAD_CONCURRENCY,
-      (task) => uploadImage(quotationId, task.value, uploadedKeys)
+      async (task) => {
+        try {
+          return await uploadImage(quotationId, task.value, uploadedKeys);
+        } catch (error) {
+          if (task.type !== "logo" || !isMissingS3ObjectError(error)) throw error;
+          console.warn("Quotation logo is missing from S3; saving quotation without it");
+          return "";
+        }
+      }
     );
   } catch (error) {
     await deleteS3Keys(uploadedKeys).catch(() => {});
@@ -378,5 +398,6 @@ module.exports = {
   normalizeQuotationImageReferences,
   normalizeQuotationImageUrl,
   inlineQuotationImages,
+  isMissingS3ObjectError,
   uploadQuotationImages,
 };

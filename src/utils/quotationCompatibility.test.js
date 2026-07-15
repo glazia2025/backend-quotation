@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 
 const Quotation = require("../models/Quotation/Quotation");
 const {
+  isMissingS3ObjectError,
   normalizeQuotationImageUrl,
   uploadQuotationImages,
 } = require("./quotationImages");
@@ -80,6 +81,15 @@ test("incorrect legacy quotation bucket URLs are repaired", () => {
     corrected,
     "https://quotation-img.s3.ap-south-1.amazonaws.com/quotations/quote-1/image.png"
   );
+});
+
+test("missing S3 objects can be distinguished from operational S3 errors", () => {
+  assert.equal(isMissingS3ObjectError({ name: "NoSuchKey" }), true);
+  assert.equal(
+    isMissingS3ObjectError({ $metadata: { httpStatusCode: 404 } }),
+    true
+  );
+  assert.equal(isMissingS3ObjectError({ name: "AccessDenied" }), false);
 });
 
 test("concurrent PDF requests share one generation", async () => {
