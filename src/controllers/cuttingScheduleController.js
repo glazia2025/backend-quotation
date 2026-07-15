@@ -538,7 +538,6 @@ const getHardwareAdjustment = (product, context) =>
 //   requiredLength = toNumber(requiredLength);
 //   stockLength = toNumber(stockLength);
 
-//   // Invalid values
 //   if (requiredLength <= 0 || stockLength <= 0) {
 //     return {
 //       profilesUsed: 0,
@@ -546,10 +545,10 @@ const getHardwareAdjustment = (product, context) =>
 //     };
 //   }
 
-//   // Is SAP ka available leftover
+//   // Is SAP ka pehle se available leftover
 //   let available = leftoverBySap[sapCode] || 0;
 
-//   // Agar sirf leftover se kaam ho gaya
+//   // Agar leftover  kaafi hai
 //   if (available >= requiredLength) {
 //     leftoverBySap[sapCode] = available - requiredLength;
 
@@ -559,26 +558,24 @@ const getHardwareAdjustment = (product, context) =>
 //     };
 //   }
 
-//   // Pehle leftover use karo
+//   // Pehle leftover use kar lo
 //   requiredLength -= available;
 
-//   // Kitni nayi stock profiles lagenge
+//   // Ab kitni new stock profiles lagenge
 //   const profilesUsed = Math.ceil(requiredLength / stockLength);
 
-//   // Last profile me kitna material use hua
-//   const usedInLastProfile = requiredLength % stockLength;
+//   // Total stock length jo issue hui
+//   const totalLengthTaken = profilesUsed * stockLength;
 
-//   // Last profile ka leftover
-//   leftoverBySap[sapCode] =
-//     usedInLastProfile === 0
-//       ? 0
-//       : stockLength - usedInLastProfile;
+//   // Bacha hua material
+//   leftoverBySap[sapCode] = totalLengthTaken - requiredLength;
 
 //   return {
 //     profilesUsed,
 //     leftover: leftoverBySap[sapCode],
 //   };
 // }
+
 function consumeProfileLength(
   sapCode,
   requiredLength,
@@ -591,39 +588,61 @@ function consumeProfileLength(
   if (requiredLength <= 0 || stockLength <= 0) {
     return {
       profilesUsed: 0,
-      leftover: leftoverBySap[sapCode] || 0,
+      leftovers: leftoverBySap[sapCode] || [],
     };
   }
 
-  // Is SAP ka pehle se available leftover
-  let available = leftoverBySap[sapCode] || 0;
+  if (!leftoverBySap[sapCode]) {
+    leftoverBySap[sapCode] = [];
+  }
 
-  // Agar leftover  kaafi hai
-  if (available >= requiredLength) {
-    leftoverBySap[sapCode] = available - requiredLength;
+  const leftovers = leftoverBySap[sapCode];
+
+  // First Fit
+  // for (let i = 0; i < leftovers.length; i++) {
+  //   if (leftovers[i] >= requiredLength) {
+  //     leftovers[i] -= requiredLength;
+
+  //     return {
+  //       profilesUsed: 0,
+  //       leftovers,
+  //     };
+  //   }
+  // }
+
+  let bestIndex = -1;
+let minimumWaste = Infinity;
+
+for (let i = 0; i < leftovers.length; i++) {
+    if (leftovers[i] >= requiredLength) {
+        const waste = leftovers[i] - requiredLength;
+
+        if (waste < minimumWaste) {
+            minimumWaste = waste;
+            bestIndex = i;
+        }
+    }
+}
+
+if (bestIndex !== -1) {
+    leftovers[bestIndex] -= requiredLength;
 
     return {
-      profilesUsed: 0,
-      leftover: leftoverBySap[sapCode],
+        profilesUsed: 0,
+        leftovers,
     };
-  }
+}
 
-  // Pehle leftover use kar lo
-  requiredLength -= available;
+  // Nayi profile lo
+ const profilesUsed = Math.ceil(requiredLength / stockLength);
+const newLeftover = profilesUsed * stockLength - requiredLength;
 
-  // Ab kitni new stock profiles lagenge
-  const profilesUsed = Math.ceil(requiredLength / stockLength);
+leftovers.push(newLeftover);
 
-  // Total stock length jo issue hui
-  const totalLengthTaken = profilesUsed * stockLength;
-
-  // Bacha hua material
-  leftoverBySap[sapCode] = totalLengthTaken - requiredLength;
-
-  return {
+return {
     profilesUsed,
-    leftover: leftoverBySap[sapCode],
-  };
+    leftovers,
+};
 }
 
 const addBomRow = (groups, row) => {
