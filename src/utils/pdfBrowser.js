@@ -21,6 +21,12 @@ const PDF_CONTENT_TIMEOUT_MS = Number(process.env.PDF_CONTENT_TIMEOUT_MS || 1200
 const PDF_BROWSER_LAUNCH_TIMEOUT_MS = Number(
   process.env.PDF_BROWSER_LAUNCH_TIMEOUT_MS || 30000
 );
+const PDF_BROWSER_IDLE_TIMEOUT_MS = Number(
+  process.env.PDF_BROWSER_IDLE_TIMEOUT_MS || 30000
+);
+const PDF_BROWSER_DISK_CACHE_BYTES = Number(
+  process.env.PDF_BROWSER_DISK_CACHE_BYTES || 32 * 1024 * 1024
+);
 
 const PDF_BROWSER_ARGS = [
   "--no-sandbox",
@@ -39,6 +45,8 @@ const PDF_BROWSER_ARGS = [
   "--mute-audio",
   "--no-first-run",
   "--no-default-browser-check",
+  `--disk-cache-size=${PDF_BROWSER_DISK_CACHE_BYTES}`,
+  `--media-cache-size=${PDF_BROWSER_DISK_CACHE_BYTES}`,
 ];
 
 const withTimeout = (promise, timeoutMs, message) =>
@@ -59,6 +67,13 @@ const withTimeout = (promise, timeoutMs, message) =>
 let sharedBrowserHandle = null;
 let sharedBrowserPromise = null;
 let staleCleanupDone = false;
+let sharedBrowserUsers = 0;
+let sharedBrowserIdleTimer = null;
+
+const clearSharedBrowserIdleTimer = () => {
+  if (sharedBrowserIdleTimer) clearTimeout(sharedBrowserIdleTimer);
+  sharedBrowserIdleTimer = null;
+};
 
 const allowedAssetOrigins = () => {
   const origins = new Set();
@@ -138,8 +153,16 @@ const cleanupStalePdfTempDirs = (maxAgeMs = STALE_TEMP_MAX_AGE_MS) => {
 };
 
 const launchPdfBrowser = async () => {
-  if (sharedBrowserHandle?.browser?.connected) return sharedBrowserHandle;
-  if (sharedBrowserPromise) return sharedBrowserPromise;
+  clearSharedBrowserIdleTimer();
+  if (sharedBrowserHandle?.browser?.connected) {
+    sharedBrowserUsers += 1;
+    return sharedBrowserHandle;
+  }
+  if (sharedBrowserPromise) {
+    const handle = await sharedBrowserPromise;
+    sharedBrowserUsers += 1;
+    return handle;
+  }
 
   if (!staleCleanupDone) {
     cleanupStalePdfTempDirs();
@@ -168,7 +191,11 @@ const launchPdfBrowser = async () => {
 
       const handle = { browser, userDataDir, shared: true };
       browser.once("disconnected", () => {
-        if (sharedBrowserHandle === handle) sharedBrowserHandle = null;
+        if (sharedBrowserHandle === handle) {
+          sharedBrowserHandle = null;
+          sharedBrowserUsers = 0;
+          clearSharedBrowserIdleTimer();
+        }
         rmTempPath(userDataDir);
       });
       sharedBrowserHandle = handle;
@@ -181,7 +208,9 @@ const launchPdfBrowser = async () => {
     }
   })();
 
-  return sharedBrowserPromise;
+  const handle = await sharedBrowserPromise;
+  sharedBrowserUsers += 1;
+  return handle;
 };
 
 const preparePdfPage = async (page) => {
@@ -249,7 +278,22 @@ const setPdfContent = async (page, html) => {
 
 const closePdfBrowser = async (handle) => {
   if (!handle) return;
-  if (handle.shared) return;
+  if (handle.shared) {
+    sharedBrowserUsers = Math.max(0, sharedBrowserUsers - 1);
+    if (sharedBrowserUsers > 0 || sharedBrowserHandle !== handle) return;
+
+    clearSharedBrowserIdleTimer();
+    sharedBrowserIdleTimer = setTimeout(() => {
+      sharedBrowserIdleTimer = null;
+      if (sharedBrowserUsers === 0 && sharedBrowserHandle === handle) {
+        shutdownPdfBrowser().catch((error) => {
+          console.warn("Unable to close idle PDF browser:", error.message);
+        });
+      }
+    }, Math.max(0, PDF_BROWSER_IDLE_TIMEOUT_MS));
+    sharedBrowserIdleTimer.unref?.();
+    return;
+  }
 
   try {
     if (handle.browser) {
@@ -276,8 +320,10 @@ const closePdfBrowser = async (handle) => {
 };
 
 const shutdownPdfBrowser = async () => {
+  clearSharedBrowserIdleTimer();
   const handle = sharedBrowserHandle;
   sharedBrowserHandle = null;
+  sharedBrowserUsers = 0;
   if (!handle) return;
 
   try {

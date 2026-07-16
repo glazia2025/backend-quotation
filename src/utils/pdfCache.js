@@ -9,7 +9,7 @@ const MEMORY_CACHE_MAX_AGE_MS = Number(
   process.env.QUOTATION_PDF_MEMORY_CACHE_MAX_AGE_MS || 15 * 60 * 1000
 );
 const MEMORY_CACHE_MAX_BYTES = Number(
-  process.env.QUOTATION_PDF_MEMORY_CACHE_MAX_BYTES || 256 * 1024 * 1024
+  process.env.QUOTATION_PDF_MEMORY_CACHE_MAX_BYTES || 64 * 1024 * 1024
 );
 const inFlight = new Map();
 const memoryCache = new Map();
@@ -60,6 +60,10 @@ const rememberPdf = (quotation, type, buffer, generatedAt = Date.now()) => {
   const existing = memoryCache.get(key);
   if (existing) memoryCacheBytes -= existing.buffer.length;
   memoryCache.delete(key);
+
+  // A single unusually large PDF must not defeat the process-wide cache cap.
+  if (buffer.length > MEMORY_CACHE_MAX_BYTES) return;
+
   memoryCache.set(key, {
     buffer,
     generatedAt,
