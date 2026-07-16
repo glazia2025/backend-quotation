@@ -27,6 +27,9 @@ const WARMUP_DELAY_MS = readDurationMs("QUOTATION_PDF_WARMUP_DELAY_MS", 1200, {
 const POLL_MS = readDurationMs("QUOTATION_PDF_WORKER_POLL_MS", 1000);
 const LEASE_MS = readDurationMs("QUOTATION_PDF_WORKER_LEASE_MS", 30000);
 const STALE_JOB_MS = readDurationMs("QUOTATION_PDF_JOB_STALE_MS", 10 * 60 * 1000);
+const WARMUP_ENABLED = !["0", "false", "no", "off"].includes(
+  String(process.env.QUOTATION_PDF_WARMUP_ENABLED || "true").trim().toLowerCase()
+);
 const instanceId = `${process.pid}-${crypto.randomUUID()}`;
 const timers = new Map();
 let workerInterval = null;
@@ -74,6 +77,8 @@ async function enqueuePdfGeneration(quotationId, userId) {
 }
 
 function scheduleQuotationPdfWarmup(quotationId, userId) {
+  if (!WARMUP_ENABLED) return;
+
   const id = String(quotationId);
   const existing = timers.get(id);
   if (existing) clearTimeout(existing);
@@ -257,6 +262,10 @@ async function workerTick() {
 }
 
 async function startPdfGenerationWorker() {
+  if (!WARMUP_ENABLED) {
+    console.log("Quotation PDF warmup worker is disabled");
+    return;
+  }
   if (workerInterval) return;
   await Promise.all([PdfGenerationJob.init(), PdfWorkerLease.init()]);
   await acquireOrRenewLease();
