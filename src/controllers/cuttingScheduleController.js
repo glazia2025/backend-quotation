@@ -529,53 +529,6 @@ const getProfileRateBySapCode = (profileOption, sapCode) => {
 const getHardwareAdjustment = (product, context) =>
   getDynamicAdjustment(context.dynamicPricing.hardware, [product?.subCategory]);
 
-// function consumeProfileLength(
-//   sapCode,
-//   requiredLength,
-//   stockLength,
-//   leftoverBySap
-// ) {
-//   requiredLength = toNumber(requiredLength);
-//   stockLength = toNumber(stockLength);
-
-//   if (requiredLength <= 0 || stockLength <= 0) {
-//     return {
-//       profilesUsed: 0,
-//       leftover: leftoverBySap[sapCode] || 0,
-//     };
-//   }
-
-//   // Is SAP ka pehle se available leftover
-//   let available = leftoverBySap[sapCode] || 0;
-
-//   // Agar leftover  kaafi hai
-//   if (available >= requiredLength) {
-//     leftoverBySap[sapCode] = available - requiredLength;
-
-//     return {
-//       profilesUsed: 0,
-//       leftover: leftoverBySap[sapCode],
-//     };
-//   }
-
-//   // Pehle leftover use kar lo
-//   requiredLength -= available;
-
-//   // Ab kitni new stock profiles lagenge
-//   const profilesUsed = Math.ceil(requiredLength / stockLength);
-
-//   // Total stock length jo issue hui
-//   const totalLengthTaken = profilesUsed * stockLength;
-
-//   // Bacha hua material
-//   leftoverBySap[sapCode] = totalLengthTaken - requiredLength;
-
-//   return {
-//     profilesUsed,
-//     leftover: leftoverBySap[sapCode],
-//   };
-// }
-
 function consumeProfileLength(
   sapCode,
   requiredLength,
@@ -597,19 +550,6 @@ function consumeProfileLength(
   }
 
   const leftovers = leftoverBySap[sapCode];
-
-  // First Fit
-  // for (let i = 0; i < leftovers.length; i++) {
-  //   if (leftovers[i] >= requiredLength) {
-  //     leftovers[i] -= requiredLength;
-
-  //     return {
-  //       profilesUsed: 0,
-  //       leftovers,
-  //     };
-  //   }
-  // }
-
   let bestIndex = -1;
 let minimumWaste = Infinity;
 
@@ -633,7 +573,6 @@ if (bestIndex !== -1) {
     };
 }
 
-  // Nayi profile lo
  const profilesUsed = Math.ceil(requiredLength / stockLength);
 const newLeftover = profilesUsed * stockLength - requiredLength;
 
@@ -865,12 +804,7 @@ console.log({
           evaluateFormula(beading.formula, variables)
         );
         const stockLength = toNumber(beadingProduct?.length);
-
-        // const beadingQty =
-        //   stockLength > 0
-        //     ? Math.ceil(stockLength / requiredLength)
-        //     : 0;
-        console.log("===== BEADING BEFORE =====");
+        console.log("BEADING BEFORE");
 console.log({
   sap: beading.sapCode,
   requiredLength,
@@ -924,12 +858,7 @@ const beadingQty = profilesUsed;
 
         const stockLength = toNumber(gasketProduct?.length);
 
-        // const gasketQty =
-        //   stockLength > 0
-        //     ? Math.ceil(stockLength / requiredLength)
-        //     : 0;
-
-        console.log("========== GASKET ==========");
+        console.log("GASKET");
 console.log({
   sap: gasket.sapCode,
   requiredLength,
@@ -1065,17 +994,11 @@ const buildScheduleData = async (quotation) => {
           `${item.systemType}||${item.series}||${item.description}||${glassSpec}`
           ]
           : null;
-
-      // if (line.itemType === "glass" && !linkedBeading) {
-      //   notes.push(`Beading not set for glass "${glassSpec || "-"}" by admin.`);
-      //   continue;
-      // }
       rows.push({
         itemType: line.itemType,
         description:
           line.itemType === "glass"
             ?
-            // linkedBeading.beadingDescription || line.description ||
             glassSpec || "Glass beading"
             : line.description || catalogProduct?.label || line.sapCode,
         sapCode: line.itemType === "glass" ? "--" : line.sapCode,
