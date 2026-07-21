@@ -34,14 +34,38 @@ async function createQuotationItems(quotationId, items = []) {
     const subItemIds = subItems.map(
       () => new mongoose.Types.ObjectId()
     );
+    const subItemIdMap = new Map();
 
-    documents.push({
-      _id: topLevelId,
-      quotation: quotationId,
-      parentItem: null,
-      subItems: subItemIds,
-      ...itemPayload(item),
-    });
+subItems.forEach((subItem, index) => {
+  if (subItem.id) {
+    subItemIdMap.set(subItem.id, subItemIds[index]);
+  }
+});
+
+    // documents.push({
+    //   _id: topLevelId,
+    //   quotation: quotationId,
+    //   parentItem: null,
+    //   subItems: subItemIds,
+    //   ...itemPayload(item),
+    // });
+
+    const payload = itemPayload(item);
+payload.joins = Array.isArray(payload.joins)
+  ? payload.joins.map((join) => ({
+      p1: subItemIdMap.get(join.p1),
+      p2: subItemIdMap.get(join.p2),
+      type: join.type,
+    }))
+  : [];
+
+documents.push({
+  _id: topLevelId,
+  quotation: quotationId,
+  parentItem: null,
+  subItems: subItemIds,
+  ...payload,
+});
 
     subItems.forEach((subItem, index) => {
       documents.push({

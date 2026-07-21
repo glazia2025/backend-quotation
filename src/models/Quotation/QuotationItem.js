@@ -59,6 +59,25 @@ const quotationItemSchema = new mongoose.Schema(
       default: null,
     },
     subItems: [{ type: mongoose.Schema.Types.ObjectId, ref: "QuotationItem" }],
+    joins: [
+  {
+    p1: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "QuotationItem",
+      required: true,
+    },
+    p2: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "QuotationItem",
+      required: true,
+    },
+    type: {
+      type: String,
+      enum: ["Mullion", "Coupler"],
+      required: true,
+    },
+  },
+],
     ...itemFields,
   },
   { timestamps: true }
