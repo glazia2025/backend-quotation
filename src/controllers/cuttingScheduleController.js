@@ -804,27 +804,39 @@ console.log({
           evaluateFormula(beading.formula, variables)
         );
         const stockLength = toNumber(beadingProduct?.length);
-        console.log("BEADING BEFORE");
-console.log({
-  sap: beading.sapCode,
-  requiredLength,
-  stockLength,
-  availableBefore: leftoverBySap[beading.sapCode] || 0,
-});
+//         console.log("BEADING BEFORE");
+// console.log({
+//   sap: beading.sapCode,
+//   requiredLength,
+//   stockLength,
+//   availableBefore: leftoverBySap[beading.sapCode] || 0,
+// });
         const { profilesUsed } = consumeProfileLength(
   beading.sapCode,
   requiredLength,
   stockLength,
   leftoverBySap
 );
-console.log({
-  sap: beading.sapCode,
-  profilesUsed,
-  availableAfter: leftoverBySap[beading.sapCode],
-});
+// console.log({
+//   sap: beading.sapCode,
+//   profilesUsed,
+//   availableAfter: leftoverBySap[beading.sapCode],
+// });
 
 const beadingQty = profilesUsed;
         const beadingAmount = round2(beadingQty * beadingRate);
+        console.log("========== BEADING BOM ==========");
+console.log({
+  item: item.refCode || item.location,
+  sap: beading.sapCode,
+  description: beading.description,
+  requiredLength,
+  stockLength,
+  qtyToAdd: beadingQty,
+  rate: beadingRate,
+  amount: beadingAmount,
+  leftover: leftoverBySap[beading.sapCode],
+});
         addBomRow(groups, {
           type: "Beading",
           system: item.systemType,
@@ -858,13 +870,13 @@ const beadingQty = profilesUsed;
 
         const stockLength = toNumber(gasketProduct?.length);
 
-        console.log("GASKET");
-console.log({
-  sap: gasket.sapCode,
-  requiredLength,
-  stockLength,
-  availableBefore: leftoverBySap[gasket.sapCode] || 0,
-});
+//         console.log("GASKET");
+// console.log({
+//   sap: gasket.sapCode,
+//   requiredLength,
+//   stockLength,
+//   availableBefore: leftoverBySap[gasket.sapCode] || 0,
+// });
 
         const { profilesUsed } = consumeProfileLength(
   gasket.sapCode,
@@ -872,14 +884,26 @@ console.log({
   stockLength,
   leftoverBySap
 );
-console.log({
-  sap: gasket.sapCode,
-  profilesUsed,
-  availableAfter: leftoverBySap[gasket.sapCode],
-});
+// console.log({
+//   sap: gasket.sapCode,
+//   profilesUsed,
+//   availableAfter: leftoverBySap[gasket.sapCode],
+// });
 
 const gasketQty = profilesUsed;
         const gasketAmount = round2(gasketQty * gasketRate);
+        console.log("========== GASKET BOM ==========");
+console.log({
+  item: item.refCode || item.location,
+  sap: gasket.sapCode,
+  description: gasket.description,
+  requiredLength,
+  stockLength,
+  qtyToAdd: gasketQty,
+  rate: gasketRate,
+  amount: gasketAmount,
+  leftover: leftoverBySap[gasket.sapCode],
+});
 
 
         addBomRow(groups, {
