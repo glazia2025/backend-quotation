@@ -113,6 +113,13 @@ async function hydrateQuotationItems(quotation) {
     return {
       ...item,
       id: String(item._id),
+      joins: Array.isArray(item.joins)
+        ? item.joins.map((join) => ({
+            p1: String(join.p1),
+            p2: String(join.p2),
+            type: join.type,
+          }))
+        : [],
       subItems: (subItems || [])
         .map((id) => toApiItem(byId.get(String(id))))
         .filter(Boolean),
