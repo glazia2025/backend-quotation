@@ -1564,14 +1564,52 @@ function renderTermsPage(data) {
     </section>
   `;
 }
+function groupItemsForPDF(items) {
+  const pages = [];
+  let currentPage = [];
+
+  items.forEach((item) => {
+    if (item.isCombination) {
+      if (currentPage.length) {
+        pages.push(currentPage);
+        currentPage = [];
+      }
+      pages.push([item]);
+    } else {
+      currentPage.push(item);
+      if (currentPage.length === 2) {
+        pages.push(currentPage);
+        currentPage = [];
+      }
+    }
+  });
+
+  if (currentPage.length) {
+    pages.push(currentPage);
+  }
+
+  return pages;
+}
 
 function buildPdfHtml(data, user) {
-  const pages = [
-    renderCoverPage(data, user),
-    ...data.items.map((item) => renderItemPage(data, item)),
-    renderSummaryPage(data),
-    renderTermsPage(data),
-  ].join("");
+  const groupedPages = groupItemsForPDF(data.items);
+
+const pages = [
+  renderCoverPage(data, user),
+  ...groupedPages.map((group) => {
+    if (group.length === 1 && group[0].isCombination) {
+    return renderItemPage(data, group[0]);
+  }
+    return `
+      <section class="page">
+        ${group.map((item) => renderMainItemCard(item)).join("")}
+      </section>
+    `;
+  }),
+
+  renderSummaryPage(data),
+].join("");
+
 
   return `
     <!DOCTYPE html>
