@@ -529,14 +529,81 @@ const getProfileRateBySapCode = (profileOption, sapCode) => {
 const getHardwareAdjustment = (product, context) =>
   getDynamicAdjustment(context.dynamicPricing.hardware, [product?.subCategory]);
 
+function consumeProfileLength(
+  sapCode,
+  pieceLength,
+  quantity,
+  stockLength,
+  leftoverBySap
+) {
+  pieceLength = toNumber(pieceLength);
+  quantity = Math.max(0, Math.round(toNumber(quantity)));
+  stockLength = toNumber(stockLength);
+
+  if (pieceLength <= 0 || quantity <= 0 || stockLength <= 0) {
+    return {
+      profilesUsed: 0,
+      leftovers: leftoverBySap[sapCode] || [],
+    };
+  }
+
+  if (!leftoverBySap[sapCode]) {
+    leftoverBySap[sapCode] = [];
+  }
+
+  const leftovers = leftoverBySap[sapCode];
+
+  let profilesUsed = 0;
+
+  for (let q = 0; q < quantity; q++) {
+    let bestIndex = -1;
+    let minimumWaste = Infinity;
+
+    for (let i = 0; i < leftovers.length; i++) {
+      if (leftovers[i] >= pieceLength) {
+        const waste = leftovers[i] - pieceLength;
+
+        if (waste < minimumWaste) {
+          minimumWaste = waste;
+          bestIndex = i;
+        }
+      }
+    }
+
+    if (bestIndex !== -1) {
+      leftovers[bestIndex] -= pieceLength;
+
+      if (leftovers[bestIndex] <= 0) {
+        leftovers.splice(bestIndex, 1);
+      }
+
+      continue;
+    }
+    profilesUsed++;
+
+    const remaining = stockLength - pieceLength;
+
+    if (remaining > 0) {
+      leftovers.push(remaining);
+    }
+  }
+
+  return {
+    profilesUsed,
+    leftovers,
+  };
+}
+
 const addBomRow = (groups, row) => {
   const key = [
     row.type,
+    row.system,
+    row.series,
     row.itemCode,
     row.description,
     row.unit,
     round2(row.rate),
-    row.measureLabel || "",
+    // row.measureLabel || "",
   ].join("||");
 
   if (!groups.has(key)) {
@@ -581,6 +648,7 @@ const buildBomData = async (quotation) => {
   const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs, glassBeadingConfigs));
 
   const groups = new Map();
+  const leftoverBySap = {};
   const notes = [];
 
   for (const item of sourceItems) {
@@ -623,17 +691,38 @@ const buildBomData = async (quotation) => {
       }
 
       if (line.itemType === "profile") {
+       
         const product = catalogProducts.get(catalogProductKey(line));
         const adjustment = getProfileAdjustment(product, pricingContext);
         const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
         const lengthMm = toNumber(dimension, toNumber(product?.length, 0));
-        const weightKg = round3(qty * (lengthMm / 1000) * toNumber(product?.kgm, 0));
+const pieceLength = lengthMm +10;
+const stockLength = toNumber(product?.length);
+const result = consumeProfileLength(
+  line.sapCode,
+  pieceLength,
+  qty,
+  stockLength,
+  leftoverBySap
+);
+ const weightKg = round3(result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm, 0));
+console.log({
+  sap: line.sapCode,
+  qty,
+  lengthMm,
+  stockLength,
+  pieceLength,
+  result,
+  leftover: leftoverBySap[line.sapCode],
+});
         addBomRow(groups, {
           type: "Profile",
+          system: item.systemType,
+          series: item.series,
           description: line.description || product?.label || line.sapCode,
           itemCode: line.sapCode,
-          quantity: qty,
-          unit: "Pcs",
+          quantity: result.profilesUsed,
+          unit: product?.system || "Kg",
           measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
           rate,
           amount: rate * weightKg,
@@ -648,6 +737,8 @@ const buildBomData = async (quotation) => {
           : 0;
         addBomRow(groups, {
           type: "Hardware",
+          system: item.systemType,
+          series: item.series,
           description: line.description || product?.label || line.sapCode,
           itemCode: line.sapCode,
           quantity: qty,
@@ -657,52 +748,6 @@ const buildBomData = async (quotation) => {
           amount: rate * qty,
         });
         continue;
-      }
-
-      if (line.itemType === "glass") {
-        const glassSpec = String(item.glassSpec || "").trim();
-        const linkedBeading = findLinkedBeading(config?.glassBeadingLinks, glassSpec);
-        const notePrefix = `${item.refCode || item.location || item.description || "Item"}`;
-
-        if (!linkedBeading) {
-          notes.push(`${notePrefix}: Beading not set for glass "${glassSpec || "-"}" by admin.`);
-          continue;
-        }
-
-        const glassArea = round3(toNumber(item.area) * qty);
-        const glassRate = round2(toNumber(pricingContext.glassRates[glassSpec]));
-        addBomRow(groups, {
-          type: "Glass",
-          description: glassSpec || "Glass",
-          itemCode: glassSpec || "-",
-          quantity: glassArea,
-          unit: "Sqft",
-          measureLabel: dimension === "" ? "" : `${round3(dimension)} mm`,
-          rate: glassRate,
-          amount: glassRate * glassArea,
-        });
-        const beadingLine = {
-          itemType: "profile",
-          sapCode: linkedBeading.beadingSapCode,
-        };
-        const beadingProduct = catalogProducts.get(catalogProductKey(beadingLine));
-        const adjustment = getProfileAdjustment(beadingProduct, pricingContext);
-        const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
-        const lengthMm = toNumber(dimension, toNumber(beadingProduct?.length, 0));
-        const weightKg = round3(qty * (lengthMm / 1000) * toNumber(beadingProduct?.kgm, 0));
-        addBomRow(groups, {
-          type: "Profile",
-          description:
-            linkedBeading.beadingDescription ||
-            beadingProduct?.label ||
-            linkedBeading.beadingSapCode,
-          itemCode: linkedBeading.beadingSapCode,
-          quantity: qty,
-          unit: "Pcs",
-          measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
-          rate,
-          amount: rate * weightKg,
-        });
       }
     }
     if (glassBeadingConfig) {
@@ -717,66 +762,84 @@ const buildBomData = async (quotation) => {
           profileOption,
           beading.sapCode
         );
+const lengthMm = toNumber(
+  evaluateFormula(beading.formula, variables)
+);
 
-        const requiredLength = toNumber(
-          evaluateFormula(beading.formula, variables)
-        );
-        const stockLength = toNumber(beadingProduct?.length);
+const pieceLength = lengthMm + 10;
+const pieceQty = toNumber(beading.quantity, 1);
 
-        const beadingQty =
-          stockLength > 0
-            ? Math.ceil(stockLength / requiredLength)
-            : 0;
-        const beadingAmount = round2(beadingQty * beadingRate);
+const stockLength = toNumber(beadingProduct?.length);
+
+const result = consumeProfileLength(
+  beading.sapCode,
+  pieceLength,
+  pieceQty,
+  stockLength,
+  leftoverBySap
+);
+console.log({
+  sap: beading.sapCode,
+  lengthMm,
+  pieceLength,
+  stockLength,
+  result,
+  leftover: leftoverBySap[beading.sapCode],
+});
+
+const beadingAmount =round2(result.profilesUsed * beadingRate);
         addBomRow(groups, {
           type: "Beading",
+          system: item.systemType,
+          series: item.series,
           description: beading.description,
           itemCode: beading.sapCode,
-          quantity: beadingQty,
+           quantity: result.profilesUsed,
           unit: "sqft",
-          measureLabel: `${round3(requiredLength)} mm`,
+        measureLabel: `${round3(lengthMm)} mm`,
           rate: beadingRate,
           amount: beadingAmount,
         });
       });
     }
     if (glassBeadingConfig) {
-      (glassBeadingConfig.gaskets || []).forEach((gasket) => {
-        const gasketProduct = catalogProducts.get(
-          catalogProductKey({
-            itemType: "profile",
-            sapCode: gasket.sapCode,
-          })
-        );
-        const gasketRate = getProfileRateBySapCode(
-          profileOption,
-          gasket.sapCode
-        );
+(glassBeadingConfig.gaskets || []).forEach((gasket) => {
+  const gasketProduct = catalogProducts.get(
+    catalogProductKey({
+      itemType: "profile",
+      sapCode: gasket.sapCode,
+    })
+  );
 
-        const requiredLength = toNumber(
-          evaluateFormula(gasket.formula, variables)
-        );
+  const gasketRate = getProfileRateBySapCode(
+    profileOption,
+    gasket.sapCode
+  );
 
-        const stockLength = toNumber(gasketProduct?.length);
+  const requiredLength = toNumber(
+    evaluateFormula(gasket.formula, variables)
+  );
 
-        const gasketQty =
-          stockLength > 0
-            ? Math.ceil(stockLength / requiredLength)
-            : 0;
-        const gasketAmount = round2(gasketQty * gasketRate);
+  const stockLength = toNumber(gasketProduct?.length);
 
-        addBomRow(groups, {
-          type: "Gasket",
-          description: gasket.description,
-          itemCode: gasket.sapCode,
-          quantity: gasketQty,
-          unit: "sqft",
-          measureLabel: `${round3(requiredLength)} mm`,
-          rate: gasketRate,
-          amount: gasketAmount,
-        });
-      });
-    }
+  const gasketQty = Math.ceil(requiredLength / stockLength);
+  const gasketAmount = round2(gasketQty * gasketRate);
+
+  addBomRow(groups, {
+    type: "Gasket",
+    system: item.systemType,
+    series: item.series,
+    description: gasket.description,
+    itemCode: gasket.sapCode,
+    quantity: gasketQty,
+    unit: "sqft",
+    measureLabel: `${round3(requiredLength)} mm`,
+    rate: gasketRate,
+    amount: gasketAmount,
+  });
+});
+
+}
   }
   const rows = Array.from(groups.values()).sort((a, b) =>
     `${a.type} ${a.description} ${a.itemCode}`.localeCompare(
@@ -875,17 +938,11 @@ const buildScheduleData = async (quotation) => {
           `${item.systemType}||${item.series}||${item.description}||${glassSpec}`
           ]
           : null;
-
-      // if (line.itemType === "glass" && !linkedBeading) {
-      //   notes.push(`Beading not set for glass "${glassSpec || "-"}" by admin.`);
-      //   continue;
-      // }
       rows.push({
         itemType: line.itemType,
         description:
           line.itemType === "glass"
             ?
-            // linkedBeading.beadingDescription || line.description ||
             glassSpec || "Glass beading"
             : line.description || catalogProduct?.label || line.sapCode,
         sapCode: line.itemType === "glass" ? "--" : line.sapCode,
@@ -1127,12 +1184,11 @@ const renderBomRows = (rows = []) =>
         (row, index) => `
           <tr>
             <td style="text-align:center;">${index + 1}</td>
-            <td>${escapeHtml(row.itemCode)}</td>
             <td>
               ${escapeHtml(row.description)}
-              ${row.measureLabel ? `<div class="muted tiny">${escapeHtml(row.measureLabel)}</div>` : ""}
             </td>
-            <td>${escapeHtml(row.type)}</td>
+            <td>${escapeHtml(`${row.system || "-"} - ${row.series || "-"}`)}</td>
+             <td>${escapeHtml(row.itemCode)}</td>
             <td style="text-align:center;">${escapeHtml(row.quantity)}</td>
             <td style="text-align:right;">${currency(row.rate)}</td>
             <td style="text-align:center;">${escapeHtml(row.unit || "Piece")}</td>
@@ -1299,9 +1355,9 @@ const buildBomPdfHtml = (data) => {
             <thead>
               <tr>
                 <th style="width: 5%;">#</th>
-                <th style="width: 15%;">SAP Code</th>
                 <th style="width: 24%;">Description</th>
                 <th style="width: 15%;">Series</th>
+                <th style="width: 15%;">SAP Code</th>
                 <th style="width: 8%;">Qty.</th>
                 <th style="width: 12%;">Rate(₹)</th>
                 <th style="width: 8%;">Per</th>
