@@ -4,6 +4,7 @@ const path = require("path");
 
 const CuttingScheduleConfig = require("../models/Quotation/CuttingScheduleConfig");
 const GlassBeadingConfig = require("../models/Quotation/GlassBeadingConfig");
+const MullionCouplerConfig = require("../models/Quotation/MullionCouplerConfig");
 const OptionSet = require("../models/Quotation/OptionSet");
 const Quotation = require("../models/Quotation/Quotation");
 const ProfileOption = require("../models/ProfileOptions");
@@ -333,7 +334,7 @@ const uniqueConfigKeys = (items) =>
     ).values()
   );
 
-const configCatalogLines = (configs, glassBeadingConfigs) => [
+const configCatalogLines = (configs, glassBeadingConfigs, mullionCouplerConfigs = []) => [
   ...configs.flatMap((config) => [
     ...(config.lines || []),
     ...(config.schedules || []).flatMap((schedule) => schedule.lines || []),
@@ -353,7 +354,55 @@ const configCatalogLines = (configs, glassBeadingConfigs) => [
       sapCode: gasket.sapCode,
     })),
   ]),
+  ...mullionCouplerConfigs.flatMap((config) =>
+    [...(config.mullions || []), ...(config.couplers || [])].map((line) => ({
+      itemType: "profile",
+      sapCode: line.sapCode,
+    }))
+  ),
 ];
+
+const combinationJoinEntries = (quotation) =>
+  (quotation.items || []).flatMap((item) => {
+    if (
+      item.systemType !== "Combination" ||
+      !Array.isArray(item.subItems) ||
+      !Array.isArray(item.joins)
+    ) {
+      return [];
+    }
+    const subItems = new Map(
+      item.subItems.map((subItem) => [
+        String(subItem.id || subItem._id || ""),
+        subItem,
+      ])
+    );
+    return item.joins
+      .map((join) => {
+        const first = subItems.get(String(join.p1 || ""));
+        const second = subItems.get(String(join.p2 || ""));
+        const source = first || second;
+        if (!source) return null;
+        return {
+          parent: item,
+          join,
+          source,
+          systemType: source.systemType || "",
+          series: source.series || "",
+        };
+      })
+      .filter(Boolean);
+  });
+
+const uniqueMullionCouplerKeys = (entries) =>
+  Array.from(
+    new Map(
+      entries.map((entry) => {
+        const key = `${entry.systemType}||${entry.series}`;
+        return [key, { systemType: entry.systemType, series: entry.series }];
+      })
+    ).values()
+  );
 
 
 const findLinkedBeading = (links = [], glassSpec = "") => {
@@ -622,13 +671,18 @@ const addBomRow = (groups, row) => {
 const buildBomData = async (quotation) => {
   const sourceItems = itemRowsForSchedule(quotation);
   const keys = uniqueConfigKeys(sourceItems);
+  const joinEntries = combinationJoinEntries(quotation);
+  const joinKeys = uniqueMullionCouplerKeys(joinEntries);
 
-  const [configs, glassBeadingConfigs, pricingContext, profileOption] = await Promise.all([
+  const [configs, glassBeadingConfigs, mullionCouplerConfigs, pricingContext, profileOption] = await Promise.all([
     CuttingScheduleConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
     }).lean(),
     GlassBeadingConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
+    }).lean(),
+    MullionCouplerConfig.find({
+      $or: joinKeys.length ? joinKeys : [{ systemType: "__none__" }],
     }).lean(),
     getUserPricingContext(quotation.user),
     ProfileOption.findOne().lean(),
@@ -645,7 +699,13 @@ const buildBomData = async (quotation) => {
     acc[key] = config;
     return acc;
   }, {});
-  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs, glassBeadingConfigs));
+  const mullionCouplerConfigMap = mullionCouplerConfigs.reduce((acc, config) => {
+    acc[`${config.systemType}||${config.series}`] = config;
+    return acc;
+  }, {});
+  const catalogProducts = await resolveCatalogProducts(
+    configCatalogLines(configs, glassBeadingConfigs, mullionCouplerConfigs)
+  );
 
   const groups = new Map();
   const leftoverBySap = {};
@@ -841,6 +901,56 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
 
 }
   }
+
+  for (const entry of joinEntries) {
+    const config =
+      mullionCouplerConfigMap[`${entry.systemType}||${entry.series}`];
+    const lines =
+      entry.join.type === "Mullion" ? config?.mullions || [] : config?.couplers || [];
+    const parentQuantity = Math.max(1, toNumber(entry.parent.quantity, 1));
+    const variables = {
+      W: toNumber(entry.parent.width),
+      H: toNumber(entry.parent.height),
+      Q: parentQuantity,
+      AREA: toNumber(entry.parent.area),
+    };
+
+    for (const line of lines) {
+      const product = catalogProducts.get(
+        catalogProductKey({ itemType: "profile", sapCode: line.sapCode })
+      );
+      const lengthMm = toNumber(evaluateFormula(line.formula || "H", variables));
+      const pieceQuantity =
+        Math.max(0, toNumber(line.quantity, 1)) * parentQuantity;
+      const result = consumeProfileLength(
+        line.sapCode,
+        lengthMm + 10,
+        pieceQuantity,
+        toNumber(product?.length),
+        leftoverBySap
+      );
+      const weightKg = round3(
+        result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm)
+      );
+      const adjustment = getProfileAdjustment(product, pricingContext);
+      const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
+      addBomRow(groups, {
+        type: entry.join.type,
+        system: entry.systemType,
+        series: entry.series,
+        description: `${entry.join.type} - ${
+          line.description || product?.label || line.sapCode
+        }`,
+        itemCode: line.sapCode,
+        quantity: result.profilesUsed,
+        unit: product?.system || "Kg",
+        measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
+        rate,
+        amount: rate * weightKg,
+      });
+    }
+  }
+
   const rows = Array.from(groups.values()).sort((a, b) =>
     `${a.type} ${a.description} ${a.itemCode}`.localeCompare(
       `${b.type} ${b.description} ${b.itemCode}`
@@ -853,7 +963,7 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
       acc.grand = round2(acc.grand + row.amount);
       return acc;
     },
-    { Profile: 0, Hardware: 0, Glass: 0, Beading: 0, Gasket: 0, grand: 0 }
+    { Profile: 0, Hardware: 0, Glass: 0, Beading: 0, Gasket: 0, Mullion: 0, Coupler: 0, grand: 0 }
   );
 
   return {
@@ -872,14 +982,20 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
 const buildScheduleData = async (quotation) => {
   const sourceItems = itemRowsForSchedule(quotation);
   const keys = uniqueConfigKeys(sourceItems);
+  const joinEntries = combinationJoinEntries(quotation);
+  const joinKeys = uniqueMullionCouplerKeys(joinEntries);
 
-  const configs = await CuttingScheduleConfig.find({
-    $or: keys.length ? keys : [{ systemType: "__none__" }],
-  }).lean();
-
-  const glassBeadingConfigs = await GlassBeadingConfig.find({
-    $or: keys.length ? keys : [{ systemType: "__none__" }],
-  }).lean();
+  const [configs, glassBeadingConfigs, mullionCouplerConfigs] = await Promise.all([
+    CuttingScheduleConfig.find({
+      $or: keys.length ? keys : [{ systemType: "__none__" }],
+    }).lean(),
+    GlassBeadingConfig.find({
+      $or: keys.length ? keys : [{ systemType: "__none__" }],
+    }).lean(),
+    MullionCouplerConfig.find({
+      $or: joinKeys.length ? joinKeys : [{ systemType: "__none__" }],
+    }).lean(),
+  ]);
 
   const configMap = configs.reduce((acc, config) => {
     acc[`${config.systemType}||${config.series}||${config.description}`] = config;
@@ -891,7 +1007,13 @@ const buildScheduleData = async (quotation) => {
     acc[key] = config;
     return acc;
   }, {});
-  const catalogProducts = await resolveCatalogProducts(configCatalogLines(configs, glassBeadingConfigs));
+  const mullionCouplerConfigMap = mullionCouplerConfigs.reduce((acc, config) => {
+    acc[`${config.systemType}||${config.series}`] = config;
+    return acc;
+  }, {});
+  const catalogProducts = await resolveCatalogProducts(
+    configCatalogLines(configs, glassBeadingConfigs, mullionCouplerConfigs)
+  );
 
   const sections = [];
   for (const item of sourceItems) {
@@ -1036,6 +1158,53 @@ const buildScheduleData = async (quotation) => {
     });
   }
 
+  joinEntries.forEach((entry, joinIndex) => {
+    const config =
+      mullionCouplerConfigMap[`${entry.systemType}||${entry.series}`];
+    const lines =
+      entry.join.type === "Mullion" ? config?.mullions || [] : config?.couplers || [];
+    if (!lines.length) return;
+
+    const parentQuantity = Math.max(1, toNumber(entry.parent.quantity, 1));
+    const variables = {
+      W: toNumber(entry.parent.width),
+      H: toNumber(entry.parent.height),
+      Q: parentQuantity,
+      AREA: toNumber(entry.parent.area),
+    };
+    const rows = lines.map((line, index) => {
+      const product = catalogProducts.get(
+        catalogProductKey({ itemType: "profile", sapCode: line.sapCode })
+      );
+      return {
+        itemType: entry.join.type.toLowerCase(),
+        description: line.description || product?.label || line.sapCode,
+        sapCode: line.sapCode,
+        dimension: evaluateFormula(line.formula || "H", variables),
+        cutAngle: "",
+        quantity: Math.max(0, toNumber(line.quantity, 1)) * parentQuantity,
+        unit: "Pcs",
+        position: entry.join.type,
+        sortOrder: index,
+      };
+    });
+    sections.push({
+      item: {
+        ...entry.parent,
+        refCode: `${entry.parent.refCode || ""}-${entry.join.type}-${joinIndex + 1}`,
+        systemType: entry.systemType,
+        series: entry.series,
+        description: entry.join.type,
+      },
+      configFound: true,
+      scheduleKey: "",
+      horizontalAngle: "",
+      verticalAngle: "",
+      rows,
+      notes: [],
+    });
+  });
+
   return {
     quotation,
     project: quotation.customerDetails?.name || "-",
@@ -1060,6 +1229,10 @@ const renderRows = (rows) =>
                 ? "Beading"
                 : row.itemType === "gasket"
                   ? "Gasket"
+                  : row.itemType === "mullion"
+                    ? "Mullion"
+                    : row.itemType === "coupler"
+                      ? "Coupler"
                   : "Fabrication Hardware"
         )}</td>
           <td>${escapeHtml(row.description)}</td>

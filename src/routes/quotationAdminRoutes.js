@@ -52,6 +52,13 @@ const {
   listConfigs: listGlassBeadingConfigs,
   upsertConfig: upsertGlassBeadingConfig,
 } = require("../controllers/glassBeadingController");
+const {
+  deleteConfig: deleteMullionCouplerConfig,
+  getConfig: getMullionCouplerConfig,
+  getSeriesCatalog: getMullionCouplerSeriesCatalog,
+  listConfigs: listMullionCouplerConfigs,
+  upsertConfig: upsertMullionCouplerConfig,
+} = require("../controllers/mullionCouplerController");
 
 // Systems
 router.post("/systems", isAdmin, createSystem);
@@ -134,6 +141,13 @@ router.delete(
   isAdmin,
   deleteGlassBeadingConfig
 );
+
+// Series-level mullion and coupler profile rules
+router.get("/mullion-coupler/series", isAdmin, getMullionCouplerSeriesCatalog);
+router.get("/mullion-coupler/configs", isAdmin, listMullionCouplerConfigs);
+router.get("/mullion-coupler/configs/:id", isAdmin, getMullionCouplerConfig);
+router.post("/mullion-coupler/configs", isAdmin, upsertMullionCouplerConfig);
+router.delete("/mullion-coupler/configs/:id", isAdmin, deleteMullionCouplerConfig);
 
 router.get(
   "/",
