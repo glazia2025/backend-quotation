@@ -8,12 +8,17 @@ const normalizeLines = (lines = []) =>
       description: String(line.description || "").trim(),
       formula: String(line.formula || "").trim(),
       quantity: Number(line.quantity),
+      glassDimensionEffect: Number(line.glassDimensionEffect),
     }))
     .filter((line) => line.sapCode)
     .map((line) => ({
       ...line,
       formula: line.formula || "H",
       quantity: Number.isFinite(line.quantity) && line.quantity >= 1 ? line.quantity : 1,
+      glassDimensionEffect:
+        Number.isFinite(line.glassDimensionEffect) && line.glassDimensionEffect >= 0
+          ? line.glassDimensionEffect
+          : 0,
     }));
 
 const getSeriesCatalog = async (_req, res) => {

@@ -18,6 +18,36 @@ const itemPayload = (item = {}) =>
     Object.entries(item).filter(([key]) => !INTERNAL_FIELDS.has(key))
   );
 
+const remapConfiguratorLayout = (value, subItemIdMap) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const node = { ...value };
+  if (node.id && subItemIdMap.has(String(node.id))) {
+    node.id = String(subItemIdMap.get(String(node.id)));
+  }
+  if (Array.isArray(node.children)) {
+    node.children = node.children.map((child) =>
+      remapConfiguratorLayout(child, subItemIdMap)
+    );
+  }
+  return node;
+};
+
+const collectLayoutNodeIds = (node, ids = new Set()) => {
+  if (!node || typeof node !== "object") return ids;
+  if (node.id) ids.add(String(node.id));
+  if (Array.isArray(node.children)) {
+    node.children.forEach((child) => collectLayoutNodeIds(child, ids));
+  }
+  return ids;
+};
+
+const resolveJoinEndpoint = (value, subItemIdMap, validLayoutIds) => {
+  const id = String(value || "").trim();
+  if (!id) return "";
+  if (subItemIdMap.has(id)) return String(subItemIdMap.get(id));
+  return validLayoutIds.has(id) ? id : "";
+};
+
 async function createQuotationItems(quotationId, items = []) {
   if (!Array.isArray(items) || items.length === 0) {
     return { topLevelIds: [], allIds: [] };
@@ -31,41 +61,45 @@ async function createQuotationItems(quotationId, items = []) {
     topLevelIds.push(topLevelId);
 
     const subItems = Array.isArray(item?.subItems) ? item.subItems : [];
-    const subItemIds = subItems.map(
-      () => new mongoose.Types.ObjectId()
-    );
+    const subItemIds = subItems.map(() => new mongoose.Types.ObjectId());
     const subItemIdMap = new Map();
 
-subItems.forEach((subItem, index) => {
-  if (subItem.id) {
-    subItemIdMap.set(subItem.id, subItemIds[index]);
-  }
-});
-
-    // documents.push({
-    //   _id: topLevelId,
-    //   quotation: quotationId,
-    //   parentItem: null,
-    //   subItems: subItemIds,
-    //   ...itemPayload(item),
-    // });
+    subItems.forEach((subItem, index) => {
+      if (subItem.id) {
+        subItemIdMap.set(String(subItem.id), subItemIds[index]);
+      }
+    });
 
     const payload = itemPayload(item);
-payload.joins = Array.isArray(payload.joins)
-  ? payload.joins.map((join) => ({
-      p1: subItemIdMap.get(join.p1),
-      p2: subItemIdMap.get(join.p2),
-      type: join.type,
-    }))
-  : [];
+    payload.configuratorLayout = remapConfiguratorLayout(
+      payload.configuratorLayout,
+      subItemIdMap
+    );
+    const validLayoutIds = collectLayoutNodeIds(payload.configuratorLayout);
+    payload.joins = Array.isArray(payload.joins)
+      ? payload.joins.map((join) => ({
+          p1: resolveJoinEndpoint(join.p1, subItemIdMap, validLayoutIds),
+          p2: resolveJoinEndpoint(join.p2, subItemIdMap, validLayoutIds),
+          type: join.type,
+        }))
+      : [];
 
-documents.push({
-  _id: topLevelId,
-  quotation: quotationId,
-  parentItem: null,
-  subItems: subItemIds,
-  ...payload,
-});
+    const invalidJoin = payload.joins.find((join) => !join.p1 || !join.p2);
+    if (invalidJoin) {
+      const error = new Error(
+        "Every mullion/coupler join must reference a valid sub-item or layout section"
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    documents.push({
+      _id: topLevelId,
+      quotation: quotationId,
+      parentItem: null,
+      subItems: subItemIds,
+      ...payload,
+    });
 
     subItems.forEach((subItem, index) => {
       documents.push({
@@ -137,6 +171,11 @@ async function deleteQuotationItems(quotationId, filter = {}) {
 }
 
 module.exports = {
+  __test: {
+    collectLayoutNodeIds,
+    remapConfiguratorLayout,
+    resolveJoinEndpoint,
+  },
   createQuotationItems,
   deleteQuotationItems,
   hydrateQuotationItems,

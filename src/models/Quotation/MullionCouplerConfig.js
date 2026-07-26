@@ -6,6 +6,7 @@ const linkingLineSchema = new mongoose.Schema(
     description: { type: String, trim: true, default: "" },
     formula: { type: String, required: true, trim: true, default: "H" },
     quantity: { type: Number, required: true, min: 1, default: 1 },
+    glassDimensionEffect: { type: Number, min: 0, default: 0 },
   },
   { _id: true }
 );
