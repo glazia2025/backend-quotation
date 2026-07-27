@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const quotationConfigSchema = new mongoose.Schema({
     logo: { type: String },
+    website: { type: String },
     terms: { type: String },
     prerequisites: { type: String },
     additionalCosts: {
