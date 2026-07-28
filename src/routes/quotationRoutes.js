@@ -22,6 +22,7 @@ const {
   generateCuttingSchedulePdf,
 } = require("../controllers/cuttingScheduleController");
 const {
+  bulkUpdateQuotationItems,
   createQuotationItem,
   deleteQuotationItem,
   reorderQuotationItems,
@@ -61,6 +62,7 @@ router.post("/config", isUser, createOrUpdateQuotationConfig);
 
 router.post("/:id/items", isUser, createQuotationItem);
 router.patch("/:id/items/reorder", isUser, reorderQuotationItems);
+router.patch("/:id/items/bulk-update", isUser, bulkUpdateQuotationItems);
 router.patch("/:id/items/:itemId", isUser, updateQuotationItem);
 router.delete("/:id/items/:itemId", isUser, deleteQuotationItem);
 router.get("/:id", isUser, getQuotationById);

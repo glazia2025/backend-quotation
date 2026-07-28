@@ -215,7 +215,87 @@ const reorderQuotationItems = async (req, res) => {
   }
 };
 
+const BULK_UPDATE_FIELDS = {
+  glass: "glassSpec",
+  colorFinish: "colorFinish",
+};
+
+const replaceLegacyItemOption = (items, field, from, to) => {
+  let updatedCount = 0;
+  (items || []).forEach((item) => {
+    if (String(item?.[field] || "").trim() === from) {
+      item[field] = to;
+      updatedCount += 1;
+    }
+    updatedCount += replaceLegacyItemOption(item?.subItems, field, from, to);
+  });
+  return updatedCount;
+};
+
+const bulkUpdateQuotationItems = async (req, res) => {
+  try {
+    const quotation = await findQuotation(req, res);
+    if (!quotation) return;
+
+    const field = BULK_UPDATE_FIELDS[String(req.body?.field || "")];
+    const from = String(req.body?.from || "").trim();
+    const to = String(req.body?.to || "").trim();
+    if (!field) {
+      return res.status(400).json({
+        message: "field must be either glass or colorFinish",
+      });
+    }
+    if (!from || !to) {
+      return res.status(400).json({ message: "from and to are required" });
+    }
+    if (from === to) {
+      return res.status(400).json({ message: "Replacement option must be different" });
+    }
+
+    const result = await QuotationItem.updateMany(
+      { quotation: quotation._id, [field]: from },
+      { $set: { [field]: to } }
+    );
+    let updatedCount = result.modifiedCount || 0;
+    if (
+      updatedCount === 0 &&
+      (!quotation.quotationItems || quotation.quotationItems.length === 0) &&
+      Array.isArray(quotation.items)
+    ) {
+      updatedCount = replaceLegacyItemOption(
+        quotation.items,
+        field,
+        from,
+        to
+      );
+      if (updatedCount > 0) quotation.markModified("items");
+    }
+    if (updatedCount === 0) {
+      return res.status(404).json({
+        message: `No quotation items use "${from}"`,
+      });
+    }
+
+    await touchQuotation(quotation, req.user?.userId);
+    const hydrated = await hydrateQuotationItems(quotation.toObject());
+    return res.json({
+      quotation: hydrated,
+      updatedCount,
+      field: req.body.field,
+      from,
+      to,
+    });
+  } catch (error) {
+    console.error("Error bulk updating quotation items:", error);
+    return res.status(500).json({
+      message: error.message || "Error bulk updating quotation items",
+    });
+  }
+};
+
 module.exports = {
+  __test: { replaceLegacyItemOption },
+  bulkUpdateQuotationItems,
   createQuotationItem,
   deleteQuotationItem,
   reorderQuotationItems,
