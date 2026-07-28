@@ -38,6 +38,7 @@ const quotationSchema = new mongoose.Schema(
     },
     globalConfig: {
       logo: { type: String },
+      website: { type: String },
       terms: { type: String },
       prerequisites: { type: String },
       additionalCosts: {

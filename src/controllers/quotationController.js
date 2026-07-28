@@ -1008,6 +1008,7 @@ function prepareQuotationPdfData(quotation) {
 
   const globalConfig = {
     logo: normalizeImage(quotation?.globalConfig?.logo),
+    website: safeString(quotation?.globalConfig?.website),
     terms: safeString(quotation?.globalConfig?.terms),
     prerequisites: safeString(quotation?.globalConfig?.prerequisites),
     additionalCosts: {
@@ -1109,6 +1110,7 @@ function renderCoverPage(data, user) {
     data.generatedId || data.quotationDetails.id || "Quotation"
   );
   const quoteDate = escapeHtml(data.quotationDetails.displayDate || "-");
+  const website = escapeHtml(data.globalConfig.website || "");
 
   const logoHtml = data.globalConfig.logo
     ? `<img src="${data.globalConfig.logo}" alt="Logo" class="logo" />`
@@ -1117,7 +1119,21 @@ function renderCoverPage(data, user) {
   return `
     <section class="page cover-page">
       <div class="cover-top">
-        <div>${logoHtml}</div>
+       <div>
+  ${logoHtml}
+
+  ${
+    website
+      ? `
+      <div class="company-website">
+        <a href="${website.startsWith("http") ? website : `https://${website}`}" target="_blank">
+          ${website}
+        </a>
+      </div>
+      `
+      : ""
+  }
+</div>
         <div class="company-block">
           <div class="company-name">${companyName}</div>
           ${companyAddress ? `<div>${companyAddress}</div>` : ""}
@@ -1682,6 +1698,22 @@ const pages = [
             font-size: 12px;
             max-width: 320px;
           }
+           .company-website {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.company-website a {
+  color: #2563eb;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.company-website a:hover {
+  color: #1d4ed8;
+}
 
           .separator {
             border-top: 2px solid #aa9f89;
@@ -2171,6 +2203,7 @@ const renderQuotationPdfBuffer = async (quotation, user) => {
     const preparedData = prepareQuotationPdfData(
       await inlineQuotationImages(quotation)
     );
+    console.log(preparedData.globalConfig);
     const html = buildPdfHtml(preparedData, user);
     browserHandle = await launchPdfBrowser();
     page = await browserHandle.browser.newPage();
