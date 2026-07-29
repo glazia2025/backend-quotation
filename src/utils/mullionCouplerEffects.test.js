@@ -6,6 +6,7 @@ const {
     buildGlassDimensionEffects,
     compileGlassRows,
     consolidateCombinationGlassSections,
+    evaluateGlassDimensionFormula,
     getDisplayCutAngles,
     getJoinFormulaVariables,
     getJoinOrientation,
@@ -169,12 +170,62 @@ test("width and height glass lines compile into one pane row", () => {
   assert.deepEqual(rows[1], {
     itemType: "glass",
     description: "6mm Clear",
+    glassRef: "G1",
     dimension: "480 x 980",
     quantity: 2,
     unit: "Pcs",
-    position: "Glass size",
+    position: "G1 - Glass size",
     linkedBeading: undefined,
   });
+});
+
+test("multiple glass references compile into independent panes", () => {
+  const rows = compileGlassRows([
+    {
+      itemType: "glass",
+      glassRef: "G1",
+      description: "6mm Clear",
+      dimension: 450,
+      dimensionAxis: "width",
+      quantity: 1,
+    },
+    {
+      itemType: "glass",
+      glassRef: "G1",
+      description: "6mm Clear",
+      dimension: 950,
+      dimensionAxis: "height",
+      quantity: 1,
+    },
+    {
+      itemType: "glass",
+      glassRef: "G2",
+      description: "6mm Clear",
+      dimension: 300,
+      dimensionAxis: "width",
+      quantity: 1,
+    },
+    {
+      itemType: "glass",
+      glassRef: "G2",
+      description: "6mm Clear",
+      dimension: 950,
+      dimensionAxis: "height",
+      quantity: 1,
+    },
+  ]);
+
+  assert.deepEqual(
+    rows.map((row) => ({
+      glassRef: row.glassRef,
+      dimension: row.dimension,
+      position: row.position,
+    })),
+    [
+      { glassRef: "G1", dimension: "450 x 950", position: "G1 - Glass size" },
+      { glassRef: "G2", dimension: "300 x 950", position: "G2 - Glass size" },
+    ]
+  );
 });
 
 test("combination panes with identical dimensions consolidate quantity", () => {
@@ -287,7 +338,7 @@ test("combination profiles and glass share one parent fabrication section", () =
   );
 });
 
-test("combination formula inputs come from each layout sub-frame", () => {
+test("combination rows retain whole-frame variables and split ratios", () => {
   const rows = itemRowsForSchedule({
     items: [
       {
@@ -316,11 +367,33 @@ test("combination formula inputs come from each layout sub-frame", () => {
       refCode: row.refCode,
       width: row.width,
       height: row.height,
+      frameWidth: row.frameWidth,
+      frameHeight: row.frameHeight,
+      widthRatio: row.subFrameWidthRatio,
+      heightRatio: row.subFrameHeightRatio,
       quantity: row.quantity,
     })),
     [
-      { refCode: "W1-a", width: 480, height: 1000, quantity: 2 },
-      { refCode: "W1-b", width: 720, height: 1000, quantity: 2 },
+      {
+        refCode: "W1-a",
+        width: 480,
+        height: 1000,
+        frameWidth: 1200,
+        frameHeight: 1000,
+        widthRatio: 0.4,
+        heightRatio: 1,
+        quantity: 2,
+      },
+      {
+        refCode: "W1-b",
+        width: 720,
+        height: 1000,
+        frameWidth: 1200,
+        frameHeight: 1000,
+        widthRatio: 0.6,
+        heightRatio: 1,
+        quantity: 2,
+      },
     ]
   );
 });
@@ -356,7 +429,7 @@ test("vertical joins use only H formulas and horizontal joins use only W formula
   );
 });
 
-test("nested join formulas use the dimensions of the owning split section", () => {
+test("nested join formulas use the whole frame dimensions", () => {
   const entry = {
     parent: {
       width: 1200,
@@ -391,8 +464,30 @@ test("nested join formulas use the dimensions of the owning split section", () =
 
   assert.deepEqual(getJoinFormulaVariables(entry, 1), {
     W: 1200,
-    H: 400,
+    H: 1000,
     Q: 1,
-    AREA: 5.167,
+    AREA: 12.917,
   });
+});
+
+test("glass formula runs on whole frame before split ratio and join effect", () => {
+  const variables = { W: 1000, H: 1000, Q: 1, AREA: 10.764 };
+  assert.equal(
+    evaluateGlassDimensionFormula("W - 56", variables, {
+      widthRatio: 0.5,
+      heightRatio: 1,
+      widthEffect: 28,
+      heightEffect: 0,
+    }),
+    444
+  );
+  assert.equal(
+    evaluateGlassDimensionFormula("H - 56", variables, {
+      widthRatio: 0.5,
+      heightRatio: 1,
+      widthEffect: 28,
+      heightEffect: 0,
+    }),
+    944
+  );
 });

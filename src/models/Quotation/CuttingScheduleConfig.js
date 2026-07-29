@@ -10,6 +10,7 @@ const cuttingScheduleLineSchema = new mongoose.Schema(
     },
     sapCode: { type: String, trim: true, default: "" },
     description: { type: String, trim: true, default: "" },
+    glassRef: { type: String, trim: true, uppercase: true, default: "" },
     quantityFormula: { type: String, required: true, trim: true, default: "1" },
     dimensionFormula: { type: String, trim: true, default: "" },
     cutAngle: { type: String, trim: true, default: "" },

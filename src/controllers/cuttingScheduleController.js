@@ -122,6 +122,10 @@ const normalizeLine = (line = {}, index = 0) => {
     itemType,
     sapCode: String(line.sapCode || "").trim(),
     description: String(line.description || "").trim(),
+    glassRef:
+      itemType === "glass"
+        ? String(line.glassRef || "G1").trim().toUpperCase()
+        : "",
     quantityFormula: String(line.quantityFormula || "1").trim(),
     dimensionFormula:
       itemType === "hardware" ? "" : String(line.dimensionFormula || "").trim(),
@@ -230,27 +234,42 @@ const upsertConfig = async (req, res) => {
       return res.status(400).json({ message: "Every profile and hardware line needs a SAP code" });
     }
     if (
-      payload.schedules.some(
-        (schedule) => schedule.lines.filter((line) => line.itemType === "glass").length > 2
-      )
-    ) {
-      return res.status(400).json({ message: "Each cutting schedule can have only two glass line" });
-    }
-    if (
-      payload.schedules.some(
-        (schedule) =>
-          schedule.lines.length > 0 &&
-          schedule.lines.filter((line) => line.itemType === "glass").length !== 2
-      )
-    ) {
-      return res.status(400).json({ message: "Each configured cutting schedule needs exactly two glass line" });
-    }
-    if (
       payload.schedules.some((schedule) =>
         schedule.lines.some((line) => line.itemType === "glass" && !line.dimensionFormula)
       )
     ) {
       return res.status(400).json({ message: "Glass lines need a dimension formula" });
+    }
+    for (const schedule of payload.schedules) {
+      const glassGroups = (schedule.lines || [])
+        .filter((line) => line.itemType === "glass")
+        .reduce((groups, line) => {
+          if (!groups.has(line.glassRef)) groups.set(line.glassRef, []);
+          groups.get(line.glassRef).push(line);
+          return groups;
+        }, new Map());
+      if (schedule.lines.length > 0 && glassGroups.size === 0) {
+        return res.status(400).json({
+          message: "Each configured cutting schedule needs at least one glass reference",
+        });
+      }
+      for (const [glassRef, lines] of glassGroups) {
+        const widthLines = lines.filter(
+          (line) =>
+            /\bW\b/i.test(line.dimensionFormula) &&
+            !/\bH\b/i.test(line.dimensionFormula)
+        );
+        const heightLines = lines.filter(
+          (line) =>
+            /\bH\b/i.test(line.dimensionFormula) &&
+            !/\bW\b/i.test(line.dimensionFormula)
+        );
+        if (lines.length !== 2 || widthLines.length !== 1 || heightLines.length !== 1) {
+          return res.status(400).json({
+            message: `Glass reference ${glassRef} needs exactly one width formula and one height formula`,
+          });
+        }
+      }
     }
 
     const config = await CuttingScheduleConfig.findOneAndUpdate(
@@ -329,6 +348,13 @@ const itemRowsForSchedule = (quotation) => {
               : toNumber(subItem.area),
           quantity: Math.max(1, toNumber(item.quantity, 1)),
           parentRefCode: item.refCode,
+          frameWidth: toNumber(item.width),
+          frameHeight: toNumber(item.height),
+          frameArea: toNumber(item.area),
+          subFrameWidthRatio:
+            toNumber(item.width) > 0 ? width / toNumber(item.width) : 1,
+          subFrameHeightRatio:
+            toNumber(item.height) > 0 ? height / toNumber(item.height) : 1,
           refImage: subItem.refImage || item.refImage,
         });
       });
@@ -560,25 +586,35 @@ const getJoinLinesForOrientation = (entry, config) => {
 };
 
 const getJoinFormulaVariables = (entry, quantity) => {
-  const context = findJoinLayoutContext(
-    entry.parent.configuratorLayout,
-    entry.join.p1,
-    entry.join.p2
-  );
-  const parentNode = context?.parentNode;
-  const widthRatio = toNumber(parentNode?.w, 1);
-  const heightRatio = toNumber(parentNode?.h, 1);
-  const width = toNumber(entry.parent.width) * widthRatio;
-  const height = toNumber(entry.parent.height) * heightRatio;
+  const width = toNumber(entry.parent.width);
+  const height = toNumber(entry.parent.height);
   return {
     W: width,
     H: height,
     Q: quantity,
-    AREA:
-      width > 0 && height > 0
+    AREA: toNumber(entry.parent.area) ||
+      (width > 0 && height > 0
         ? round3((width * height) / (304.8 * 304.8))
-        : toNumber(entry.parent.area),
+        : 0),
   };
+};
+
+const evaluateGlassDimensionFormula = (
+  formula,
+  variables,
+  { widthRatio = 1, heightRatio = 1, widthEffect = 0, heightEffect = 0 } = {}
+) => {
+  const expression = String(formula || "").trim();
+  const evaluated = toNumber(evaluateFormula(expression, variables));
+  const usesWidth = /\bW\b/i.test(expression);
+  const usesHeight = /\bH\b/i.test(expression);
+  if (usesWidth && !usesHeight) {
+    return round3(Math.max(0, evaluated * widthRatio - widthEffect));
+  }
+  if (usesHeight && !usesWidth) {
+    return round3(Math.max(0, evaluated * heightRatio - heightEffect));
+  }
+  return round3(Math.max(0, evaluated));
 };
 
 const buildGlassDimensionEffects = (entries, configMap) => {
@@ -616,34 +652,54 @@ const compileGlassRows = (rows = []) => {
   const otherRows = rows.filter((row) => row.itemType !== "glass");
   if (!glassRows.length) return rows;
 
-  const alreadyCombined = glassRows.filter((row) =>
-    String(row.dimension || "").toLowerCase().includes("x")
-  );
-  const separateDimensions = glassRows
-    .filter((row) => !String(row.dimension || "").toLowerCase().includes("x"))
-    .sort((a, b) => {
-      const order = { width: 0, height: 1 };
-      return (order[a.dimensionAxis] ?? 2) - (order[b.dimensionAxis] ?? 2);
-    });
-  const compiled = [...alreadyCombined];
+  const byReference = glassRows.reduce((groups, row) => {
+    const glassRef = String(row.glassRef || "G1").trim().toUpperCase();
+    if (!groups.has(glassRef)) groups.set(glassRef, []);
+    groups.get(glassRef).push({ ...row, glassRef });
+    return groups;
+  }, new Map());
+  const compiled = [];
 
-  for (let index = 0; index < separateDimensions.length; index += 2) {
-    const widthRow = separateDimensions[index];
-    const heightRow = separateDimensions[index + 1];
-    if (!heightRow) {
-      compiled.push(widthRow);
-      continue;
+  byReference.forEach((referenceRows, glassRef) => {
+    const alreadyCombined = referenceRows.filter((row) =>
+      String(row.dimension || "").toLowerCase().includes("x")
+    );
+    compiled.push(
+      ...alreadyCombined.map((row) => ({
+        ...row,
+        position: `${glassRef} - Glass size`,
+      }))
+    );
+
+    const separateDimensions = referenceRows.filter(
+      (row) => !String(row.dimension || "").toLowerCase().includes("x")
+    );
+    let widthRow = separateDimensions.find(
+      (row) => row.dimensionAxis === "width"
+    );
+    let heightRow = separateDimensions.find(
+      (row) => row.dimensionAxis === "height"
+    );
+    const unassignedRows = separateDimensions.filter(
+      (row) => row !== widthRow && row !== heightRow
+    );
+    if (!widthRow) widthRow = unassignedRows.shift();
+    if (!heightRow) heightRow = unassignedRows.shift();
+    if (!widthRow || !heightRow) {
+      compiled.push(...separateDimensions);
+      return;
     }
     const { dimensionAxis: _dimensionAxis, ...compiledRow } = widthRow;
     compiled.push({
       ...compiledRow,
+      glassRef,
       dimension: `${widthRow.dimension} x ${heightRow.dimension}`,
       quantity: Math.max(toNumber(widthRow.quantity), toNumber(heightRow.quantity)),
       unit: "Pcs",
-      position: "Glass size",
+      position: `${glassRef} - Glass size`,
       linkedBeading: widthRow.linkedBeading || heightRow.linkedBeading,
     });
-  }
+  });
 
   return [...otherRows, ...compiled];
 };
@@ -672,6 +728,7 @@ const consolidateCombinationSections = (sections, quotation) => {
     (section.rows || []).forEach((row) => {
       const key = [
         String(row.itemType || "").trim().toLowerCase(),
+        String(row.glassRef || "").trim().toLowerCase(),
         String(row.description || "").trim().toLowerCase(),
         String(row.sapCode || "").trim().toLowerCase(),
         String(row.dimension || "").trim().toLowerCase(),
@@ -1025,11 +1082,17 @@ const buildBomData = async (quotation) => {
     if (!schedule?.lines?.length) continue;
 
     const itemQuantity = Math.max(1, toNumber(item.quantity, 1));
+    const frameWidth = toNumber(item.frameWidth, toNumber(item.width));
+    const frameHeight = toNumber(item.frameHeight, toNumber(item.height));
     const variables = {
-      W: toNumber(item.width),
-      H: toNumber(item.height),
+      W: frameWidth,
+      H: frameHeight,
       Q: itemQuantity,
-      AREA: toNumber(item.area),
+      AREA:
+        toNumber(item.frameArea) ||
+        (frameWidth > 0 && frameHeight > 0
+          ? round3((frameWidth * frameHeight) / (304.8 * 304.8))
+          : toNumber(item.area)),
     };
     const glassSpec = String(item.glassSpec || "").trim();
 
@@ -1326,32 +1389,44 @@ const buildScheduleData = async (quotation) => {
     const config = configMap[key];
     const schedule = config ? findScheduleLines(config, getItemScheduleKey(item, config)) : null;
     const quantity = Math.max(1, toNumber(item.quantity, 1));
+    const frameWidth = toNumber(item.frameWidth, toNumber(item.width));
+    const frameHeight = toNumber(item.frameHeight, toNumber(item.height));
     const variables = {
-      W: toNumber(item.width),
-      H: toNumber(item.height),
+      W: frameWidth,
+      H: frameHeight,
       Q: quantity,
-      AREA: toNumber(item.area),
+      AREA:
+        toNumber(item.frameArea) ||
+        (frameWidth > 0 && frameHeight > 0
+          ? round3((frameWidth * frameHeight) / (304.8 * 304.8))
+          : toNumber(item.area)),
     };
     const itemId = String(item.id || item._id || "");
     const glassEffect = glassDimensionEffects.get(itemId) || {
       width: 0,
       height: 0,
     };
-    const glassVariables = {
-      ...variables,
-      W: Math.max(0, variables.W - glassEffect.width),
-      H: Math.max(0, variables.H - glassEffect.height),
+    const glassDimensionOptions = {
+      widthRatio: toNumber(item.subFrameWidthRatio, 1),
+      heightRatio: toNumber(item.subFrameHeightRatio, 1),
+      widthEffect: glassEffect.width,
+      heightEffect: glassEffect.height,
     };
     const rows = [];
     const beadingRows = [];
     const gasketRows = [];
+    const processedGlassRefs = new Set();
     const notes = [];
 
     for (const line of schedule?.lines || []) {
+      const glassRef =
+        line.itemType === "glass"
+          ? String(line.glassRef || "G1").trim().toUpperCase()
+          : "";
+      const isFirstGlassRefLine =
+        line.itemType === "glass" && !processedGlassRefs.has(glassRef);
       const catalogProduct = catalogProducts.get(catalogProductKey(line));
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
-      const dimensionVariables =
-        line.itemType === "glass" ? glassVariables : variables;
       let dimension = "";
       if (
         (line.itemType === "profile" || line.itemType === "glass") &&
@@ -1360,12 +1435,33 @@ const buildScheduleData = async (quotation) => {
         if (line.dimensionFormula.includes(",")) {
           const [d1, d2] = line.dimensionFormula.split(",");
 
-          const val1 = evaluateFormula(d1.trim(), dimensionVariables);
-          const val2 = evaluateFormula(d2.trim(), dimensionVariables);
+          const val1 =
+            line.itemType === "glass"
+              ? evaluateGlassDimensionFormula(
+                  d1.trim(),
+                  variables,
+                  glassDimensionOptions
+                )
+              : evaluateFormula(d1.trim(), variables);
+          const val2 =
+            line.itemType === "glass"
+              ? evaluateGlassDimensionFormula(
+                  d2.trim(),
+                  variables,
+                  glassDimensionOptions
+                )
+              : evaluateFormula(d2.trim(), variables);
 
           dimension = `${val1} x ${val2}`;
         } else {
-          dimension = evaluateFormula(line.dimensionFormula, dimensionVariables);
+          dimension =
+            line.itemType === "glass"
+              ? evaluateGlassDimensionFormula(
+                  line.dimensionFormula,
+                  variables,
+                  glassDimensionOptions
+                )
+              : evaluateFormula(line.dimensionFormula, variables);
         }
       }
       const glassSpec = String(item.glassSpec || "").trim();
@@ -1392,6 +1488,7 @@ const buildScheduleData = async (quotation) => {
         position: line.position || "",
         sortOrder: line.sortOrder || 0,
         linkedBeading,
+        glassRef,
         dimensionAxis:
           line.itemType !== "glass"
             ? undefined
@@ -1403,7 +1500,7 @@ const buildScheduleData = async (quotation) => {
                 ? "height"
                 : undefined,
       });
-      if (line.itemType === "glass" && glassBeadingConfig && beadingRows.length === 0) {
+      if (line.itemType === "glass" && glassBeadingConfig && isFirstGlassRefLine) {
         (glassBeadingConfig.beadings || []).forEach((beading) => {
           let beadingDimension = "";
 
@@ -1434,7 +1531,7 @@ const buildScheduleData = async (quotation) => {
         });
       }
 
-      if (line.itemType === "glass" && glassBeadingConfig && gasketRows.length === 0) {
+      if (line.itemType === "glass" && glassBeadingConfig && isFirstGlassRefLine) {
         (glassBeadingConfig.gaskets || []).forEach((gasket) => {
           let gasketDimension = "";
 
@@ -1465,6 +1562,7 @@ const buildScheduleData = async (quotation) => {
         });
       }
 
+      if (line.itemType === "glass") processedGlassRefs.add(glassRef);
     }
     rows.push(...beadingRows);
     rows.push(...gasketRows);
@@ -2143,6 +2241,7 @@ module.exports = {
     consolidateCombinationSections,
     getJoinOrientation,
     getDisplayCutAngles,
+    evaluateGlassDimensionFormula,
     getJoinFormulaVariables,
     itemRowsForSchedule,
     getJoinLinesForOrientation,
