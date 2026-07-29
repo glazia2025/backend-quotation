@@ -94,7 +94,9 @@ test("missing S3 objects can be distinguished from operational S3 errors", () =>
 
 test("concurrent PDF requests share one generation", async () => {
   const previousRegion = process.env.AWS_REGION;
+  const previousCacheEnabled = process.env.QUOTATION_PDF_CACHE_ENABLED;
   delete process.env.AWS_REGION;
+  process.env.QUOTATION_PDF_CACHE_ENABLED = "true";
   let generationCount = 0;
   const quotation = {
     _id: new mongoose.Types.ObjectId(),
@@ -111,8 +113,6 @@ test("concurrent PDF requests share one generation", async () => {
     getOrGeneratePdf({ quotation, type: "test", generate }),
   ]);
   const third = await getOrGeneratePdf({ quotation, type: "test", generate });
-  if (previousRegion === undefined) delete process.env.AWS_REGION;
-  else process.env.AWS_REGION = previousRegion;
 
   assert.equal(generationCount, 1);
   assert.equal(first.buffer.toString(), "pdf");
@@ -123,4 +123,47 @@ test("concurrent PDF requests share one generation", async () => {
   quotation.updatedAt = new Date(quotation.updatedAt.getTime() + 1000);
   await getOrGeneratePdf({ quotation, type: "test", generate });
   assert.equal(generationCount, 2);
+
+  if (previousRegion === undefined) delete process.env.AWS_REGION;
+  else process.env.AWS_REGION = previousRegion;
+  if (previousCacheEnabled === undefined) {
+    delete process.env.QUOTATION_PDF_CACHE_ENABLED;
+  } else {
+    process.env.QUOTATION_PDF_CACHE_ENABLED = previousCacheEnabled;
+  }
+});
+
+test("local PDF mode generates directly without using the cache", async () => {
+  const previousCacheEnabled = process.env.QUOTATION_PDF_CACHE_ENABLED;
+  const previousCacheDisabled = process.env.QUOTATION_PDF_CACHE_DISABLED;
+  delete process.env.QUOTATION_PDF_CACHE_ENABLED;
+  process.env.QUOTATION_PDF_CACHE_DISABLED = "true";
+  let generationCount = 0;
+  const quotation = {
+    _id: new mongoose.Types.ObjectId(),
+    updatedAt: new Date(),
+  };
+  const generate = async () => {
+    generationCount += 1;
+    return Buffer.from("local-pdf");
+  };
+
+  const first = await getOrGeneratePdf({ quotation, type: "local-test", generate });
+  const second = await getOrGeneratePdf({ quotation, type: "local-test", generate });
+
+  if (previousCacheEnabled === undefined) {
+    delete process.env.QUOTATION_PDF_CACHE_ENABLED;
+  } else {
+    process.env.QUOTATION_PDF_CACHE_ENABLED = previousCacheEnabled;
+  }
+  if (previousCacheDisabled === undefined) {
+    delete process.env.QUOTATION_PDF_CACHE_DISABLED;
+  } else {
+    process.env.QUOTATION_PDF_CACHE_DISABLED = previousCacheDisabled;
+  }
+
+  assert.equal(generationCount, 2);
+  assert.equal(first.cacheStatus, "BYPASS");
+  assert.equal(second.cacheStatus, "BYPASS");
+  assert.equal(second.buffer.toString(), "local-pdf");
 });

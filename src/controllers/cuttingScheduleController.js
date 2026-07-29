@@ -309,14 +309,29 @@ const itemRowsForSchedule = (quotation) => {
   const rows = [];
   (quotation.items || []).forEach((item) => {
     if (item.systemType === "Combination" && Array.isArray(item.subItems) && item.subItems.length) {
-      item.subItems.forEach((subItem) =>
+      const layoutLeaves = collectLayoutLeaves(item.configuratorLayout);
+      item.subItems.forEach((subItem, index) => {
+        const subItemId = String(subItem.id || subItem._id || "");
+        const layoutLeaf =
+          layoutLeaves.find((leaf) => String(leaf.id || "") === subItemId) ||
+          layoutLeaves[index];
+        const layoutWidth = toNumber(layoutLeaf?.w) * toNumber(item.width);
+        const layoutHeight = toNumber(layoutLeaf?.h) * toNumber(item.height);
+        const width = layoutWidth > 0 ? Math.round(layoutWidth) : toNumber(subItem.width);
+        const height = layoutHeight > 0 ? Math.round(layoutHeight) : toNumber(subItem.height);
         rows.push({
           ...subItem,
+          width,
+          height,
+          area:
+            width > 0 && height > 0
+              ? round3((width * height) / (304.8 * 304.8))
+              : toNumber(subItem.area),
           quantity: Math.max(1, toNumber(item.quantity, 1)),
           parentRefCode: item.refCode,
           refImage: subItem.refImage || item.refImage,
-        })
-      );
+        });
+      });
       return;
     }
     rows.push(item);
@@ -389,7 +404,12 @@ const findJoinLayoutContext = (node, p1, p2) => {
       (firstId === String(p1) && secondId === String(p2)) ||
       (firstId === String(p2) && secondId === String(p1))
     ) {
-      return { orientation: node.split, firstNode: children[index], secondNode: children[index + 1] };
+      return {
+        orientation: node.split,
+        parentNode: node,
+        firstNode: children[index],
+        secondNode: children[index + 1],
+      };
     }
   }
   for (const child of children) {
@@ -524,6 +544,43 @@ const getJoinOrientation = (entry) => {
   return "vertical";
 };
 
+const getJoinLinesForOrientation = (entry, config) => {
+  const configuredLines =
+    entry.join.type === "Mullion"
+      ? config?.mullions || []
+      : config?.couplers || [];
+  const dimensionVariable =
+    getJoinOrientation(entry) === "vertical" ? "H" : "W";
+  const matchingLines = configuredLines.filter((line) =>
+    new RegExp(`\\b${dimensionVariable}\\b`, "i").test(
+      String(line.formula || "")
+    )
+  );
+  return matchingLines.length ? matchingLines : configuredLines;
+};
+
+const getJoinFormulaVariables = (entry, quantity) => {
+  const context = findJoinLayoutContext(
+    entry.parent.configuratorLayout,
+    entry.join.p1,
+    entry.join.p2
+  );
+  const parentNode = context?.parentNode;
+  const widthRatio = toNumber(parentNode?.w, 1);
+  const heightRatio = toNumber(parentNode?.h, 1);
+  const width = toNumber(entry.parent.width) * widthRatio;
+  const height = toNumber(entry.parent.height) * heightRatio;
+  return {
+    W: width,
+    H: height,
+    Q: quantity,
+    AREA:
+      width > 0 && height > 0
+        ? round3((width * height) / (304.8 * 304.8))
+        : toNumber(entry.parent.area),
+  };
+};
+
 const buildGlassDimensionEffects = (entries, configMap) => {
   const effects = new Map();
   const addEffect = (itemId, axis, amount) => {
@@ -536,8 +593,7 @@ const buildGlassDimensionEffects = (entries, configMap) => {
 
   entries.forEach((entry) => {
     const config = configMap[`${entry.systemType}||${entry.series}`];
-    const lines =
-      entry.join.type === "Mullion" ? config?.mullions || [] : config?.couplers || [];
+    const lines = getJoinLinesForOrientation(entry, config);
     const effect = lines.reduce(
       (total, line) => total + Math.max(0, toNumber(line.glassDimensionEffect)),
       0
@@ -592,54 +648,65 @@ const compileGlassRows = (rows = []) => {
   return [...otherRows, ...compiled];
 };
 
-const consolidateCombinationGlassSections = (sections, quotation) => {
+const consolidateCombinationSections = (sections, quotation) => {
   const groupedByParent = new Map();
+  const standaloneSections = [];
 
   sections.forEach((section) => {
     const parentRefCode = section.item?.parentRefCode;
-    if (!parentRefCode) return;
-    const glassRows = section.rows.filter((row) => row.itemType === "glass");
-    if (!glassRows.length) return;
-    section.rows = section.rows.filter((row) => row.itemType !== "glass");
-
-    if (!groupedByParent.has(parentRefCode)) {
-      groupedByParent.set(parentRefCode, new Map());
+    if (!parentRefCode) {
+      standaloneSections.push(section);
+      return;
     }
-    const groups = groupedByParent.get(parentRefCode);
-    glassRows.forEach((row) => {
+    if (!groupedByParent.has(parentRefCode)) {
+      const parent = (quotation.items || []).find(
+        (item) => item.refCode === parentRefCode
+      );
+      groupedByParent.set(parentRefCode, {
+        parent,
+        rows: new Map(),
+        notes: new Set(),
+      });
+    }
+    const group = groupedByParent.get(parentRefCode);
+    (section.rows || []).forEach((row) => {
       const key = [
+        String(row.itemType || "").trim().toLowerCase(),
         String(row.description || "").trim().toLowerCase(),
+        String(row.sapCode || "").trim().toLowerCase(),
         String(row.dimension || "").trim().toLowerCase(),
+        String(row.cutAngle || "").trim().toLowerCase(),
         String(row.unit || "").trim().toLowerCase(),
+        String(row.position || "").trim().toLowerCase(),
       ].join("||");
-      if (!groups.has(key)) groups.set(key, { ...row, quantity: 0 });
-      const grouped = groups.get(key);
+      if (!group.rows.has(key)) group.rows.set(key, { ...row, quantity: 0 });
+      const grouped = group.rows.get(key);
       grouped.quantity = round3(grouped.quantity + toNumber(row.quantity));
     });
+    (section.notes || []).forEach((note) => group.notes.add(note));
   });
 
-  groupedByParent.forEach((groups, parentRefCode) => {
-    const parent = (quotation.items || []).find(
-      (item) => item.refCode === parentRefCode
-    );
-    sections.push({
+  groupedByParent.forEach((group, parentRefCode) => {
+    standaloneSections.push({
       item: {
-        ...(parent || {}),
-        refCode: `${parentRefCode}-Glass`,
+        ...(group.parent || {}),
+        refCode: parentRefCode,
         systemType: "Combination",
         series: "",
-        description: "Glass Summary",
+        description: group.parent?.description || "Combination",
       },
       configFound: true,
       scheduleKey: "",
       horizontalAngle: "",
       verticalAngle: "",
-      rows: Array.from(groups.values()),
-      notes: [],
+      rows: Array.from(group.rows.values()).sort(
+        (a, b) => toNumber(a.sortOrder) - toNumber(b.sortOrder)
+      ),
+      notes: Array.from(group.notes),
     });
   });
 
-  return sections.filter(
+  return standaloneSections.filter(
     (section) => section.rows.length > 0 || section.notes.length > 0
   );
 };
@@ -1145,15 +1212,9 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
   for (const entry of joinEntries) {
     const config =
       mullionCouplerConfigMap[`${entry.systemType}||${entry.series}`];
-    const lines =
-      entry.join.type === "Mullion" ? config?.mullions || [] : config?.couplers || [];
+    const lines = getJoinLinesForOrientation(entry, config);
     const parentQuantity = Math.max(1, toNumber(entry.parent.quantity, 1));
-    const variables = {
-      W: toNumber(entry.parent.width),
-      H: toNumber(entry.parent.height),
-      Q: parentQuantity,
-      AREA: toNumber(entry.parent.area),
-    };
+    const variables = getJoinFormulaVariables(entry, parentQuantity);
 
     for (const line of lines) {
       const product = catalogProducts.get(
@@ -1424,22 +1485,14 @@ const buildScheduleData = async (quotation) => {
     });
   }
 
-  sections = consolidateCombinationGlassSections(sections, quotation);
-
   joinEntries.forEach((entry, joinIndex) => {
     const config =
       mullionCouplerConfigMap[`${entry.systemType}||${entry.series}`];
-    const lines =
-      entry.join.type === "Mullion" ? config?.mullions || [] : config?.couplers || [];
+    const lines = getJoinLinesForOrientation(entry, config);
     if (!lines.length) return;
 
     const parentQuantity = Math.max(1, toNumber(entry.parent.quantity, 1));
-    const variables = {
-      W: toNumber(entry.parent.width),
-      H: toNumber(entry.parent.height),
-      Q: parentQuantity,
-      AREA: toNumber(entry.parent.area),
-    };
+    const variables = getJoinFormulaVariables(entry, parentQuantity);
     const rows = lines.map((line, index) => {
       const product = catalogProducts.get(
         catalogProductKey({ itemType: "profile", sapCode: line.sapCode })
@@ -1460,6 +1513,7 @@ const buildScheduleData = async (quotation) => {
       item: {
         ...entry.parent,
         refCode: `${entry.parent.refCode || ""}-${entry.join.type}-${joinIndex + 1}`,
+        parentRefCode: entry.parent.refCode,
         systemType: entry.systemType,
         series: entry.series,
         description: entry.join.type,
@@ -1472,6 +1526,8 @@ const buildScheduleData = async (quotation) => {
       notes: [],
     });
   });
+
+  sections = consolidateCombinationSections(sections, quotation);
 
   return {
     quotation,
@@ -1521,6 +1577,28 @@ const renderNotes = (notes = []) =>
     ? `<div class="schedule-notes">${notes.map((note) => `<div>${escapeHtml(note)}</div>`).join("")}</div>`
     : "";
 
+const getDisplayCutAngles = (section) => {
+  const item = section?.item || {};
+  const displayAngle = (value) => {
+    const angle = String(value || "").replace(/[^\d]/g, "");
+    return angle === "45" || angle === "90" ? angle : "-";
+  };
+  return {
+    frame: displayAngle(
+      item.frameCutAngle ||
+        item.cutAngleHorizontal ||
+        item.hCutAngle ||
+        section?.horizontalAngle
+    ),
+    shutter: displayAngle(
+      item.shutterCutAngle ||
+        item.cutAngleVertical ||
+        item.vCutAngle ||
+        section?.verticalAngle
+    ),
+  };
+};
+
 const buildPdfHtml = (data) => {
   const date = data.generatedAt.toLocaleDateString("en-IN");
   const time = data.generatedAt.toLocaleTimeString("en-IN");
@@ -1568,6 +1646,7 @@ const buildPdfHtml = (data) => {
       ? data.sections
         .map((section, index) => {
           const item = section.item;
+          const cutAngles = getDisplayCutAngles(section);
           const image = item.refImage
             ? `<img src="${escapeHtml(item.refImage)}" alt="${escapeHtml(item.refCode || "")}" />`
             : `<div class="placeholder">No Image</div>`;
@@ -1586,7 +1665,7 @@ const buildPdfHtml = (data) => {
                   <tr><td class="label">Typology type</td><td>${escapeHtml(item.systemType || "-")}</td></tr>
                   <tr><td class="label">Series</td><td>${escapeHtml(item.series || "-")}</td></tr>
                   <tr><td class="label">Description</td><td>${escapeHtml(item.description || "-")}</td></tr>
-                  <tr><td class="label">Cut Angles</td><td>H = ${escapeHtml(section.horizontalAngle || "-")}°; V = ${escapeHtml(section.verticalAngle || "-")}°</td></tr>
+                  <tr><td class="label">Cut Angles</td><td>Frame = ${escapeHtml(cutAngles.frame)}°; Shutter = ${escapeHtml(cutAngles.shutter)}°</td></tr>
                   <tr><td class="label">Profile Finish</td><td>${escapeHtml(item.colorFinish || "-")}</td></tr>
                   <tr><td class="label">Handle</td><td>${escapeHtml([item.handleType, item.handleColor].filter(Boolean).join(", ") || "-")}</td></tr>
                   <tr><td class="label">Mesh</td><td>${escapeHtml(item.meshPresent ? item.meshType || "Yes" : "No")}</td></tr>
@@ -2060,8 +2139,13 @@ module.exports = {
   __test: {
     buildGlassDimensionEffects,
     compileGlassRows,
-    consolidateCombinationGlassSections,
+    consolidateCombinationGlassSections: consolidateCombinationSections,
+    consolidateCombinationSections,
     getJoinOrientation,
+    getDisplayCutAngles,
+    getJoinFormulaVariables,
+    itemRowsForSchedule,
+    getJoinLinesForOrientation,
   },
   deleteConfig,
   getBeadingCatalog,

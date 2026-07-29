@@ -6,6 +6,7 @@ const PdfWorkerLease = require("../models/Quotation/PdfWorkerLease");
 const Quotation = require("../models/Quotation/Quotation");
 const User = require("../models/User");
 const { getOrGeneratePdf } = require("./pdfCache");
+const { isLocalPdfMode } = require("./pdfRuntime");
 const { hydrateQuotationItems } = require("./quotationItems");
 
 function readDurationMs(name, fallback, { allowZero = false } = {}) {
@@ -41,6 +42,7 @@ const revisionFor = (quotation) =>
   String(new Date(quotation.updatedAt || quotation.createdAt || 0).getTime());
 
 async function enqueuePdfGeneration(quotationId, userId) {
+  if (isLocalPdfMode()) return;
   const quotation = await Quotation.findById(quotationId)
     .select("_id updatedAt createdAt")
     .lean();
@@ -77,7 +79,7 @@ async function enqueuePdfGeneration(quotationId, userId) {
 }
 
 function scheduleQuotationPdfWarmup(quotationId, userId) {
-  if (!WARMUP_ENABLED) return;
+  if (!WARMUP_ENABLED || isLocalPdfMode()) return;
 
   const id = String(quotationId);
   const existing = timers.get(id);
@@ -94,6 +96,7 @@ function scheduleQuotationPdfWarmup(quotationId, userId) {
 }
 
 async function cancelPdfGeneration(quotationId) {
+  if (isLocalPdfMode()) return;
   const id = String(quotationId);
   const timer = timers.get(id);
   if (timer) clearTimeout(timer);
@@ -262,8 +265,12 @@ async function workerTick() {
 }
 
 async function startPdfGenerationWorker() {
-  if (!WARMUP_ENABLED) {
-    console.log("Quotation PDF warmup worker is disabled");
+  if (!WARMUP_ENABLED || isLocalPdfMode()) {
+    console.log(
+      isLocalPdfMode()
+        ? "Local PDF mode enabled: cache, S3 writes, and warmup worker are disabled"
+        : "Quotation PDF warmup worker is disabled"
+    );
     return;
   }
   if (workerInterval) return;
@@ -277,6 +284,7 @@ async function startPdfGenerationWorker() {
 }
 
 async function stopPdfGenerationWorker() {
+  if (isLocalPdfMode()) return;
   if (workerInterval) clearInterval(workerInterval);
   if (leaseInterval) clearInterval(leaseInterval);
   workerInterval = null;

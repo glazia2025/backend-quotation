@@ -3,6 +3,7 @@ const {
   PutObjectCommand,
   S3Client,
 } = require("@aws-sdk/client-s3");
+const { isLocalPdfMode } = require("./pdfRuntime");
 
 const BUCKET = process.env.QUOTATION_S3_BUCKET || "quotation-img";
 const MEMORY_CACHE_MAX_AGE_MS = Number(
@@ -11,6 +12,7 @@ const MEMORY_CACHE_MAX_AGE_MS = Number(
 const MEMORY_CACHE_MAX_BYTES = Number(
   process.env.QUOTATION_PDF_MEMORY_CACHE_MAX_BYTES || 64 * 1024 * 1024
 );
+const PDF_CACHE_VERSION = process.env.QUOTATION_PDF_CACHE_VERSION || "4";
 const inFlight = new Map();
 const memoryCache = new Map();
 let memoryCacheBytes = 0;
@@ -33,7 +35,9 @@ const s3Client = new S3Client({
 });
 
 const revisionFor = (quotation) =>
-  String(new Date(quotation.updatedAt || quotation.createdAt || 0).getTime());
+  `${PDF_CACHE_VERSION}:${new Date(
+    quotation.updatedAt || quotation.createdAt || 0
+  ).getTime()}`;
 
 const cacheKeyFor = (quotationId, type) =>
   `quotations/${quotationId}/pdf-cache/${type}.pdf`;
@@ -143,6 +147,13 @@ async function writeCachedPdf(quotation, type, buffer) {
 }
 
 async function getOrGeneratePdf({ quotation, type, generate }) {
+  if (isLocalPdfMode()) {
+    return {
+      buffer: await generate(),
+      cacheStatus: "BYPASS",
+    };
+  }
+
   const cached = await readCachedPdf(quotation, type);
   if (cached) return { buffer: cached, cacheStatus: "HIT" };
 
