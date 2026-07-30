@@ -2233,6 +2233,29 @@ const generateBomPdf = async (req, res) => {
   }
 };
 
+const getBomData = async (req, res) => {
+  try {
+    const quotation = await findQuotationForUser(req, res, true);
+    if (!quotation) return null;
+
+    const data = await buildBomData(quotation);
+    return res.status(200).json({
+      project: data.project,
+      projectCode: data.projectCode,
+      customer: data.customer,
+      rows: data.rows,
+      totals: data.totals,
+      notes: data.notes,
+    });
+  } catch (error) {
+    console.error("getBomData error", error);
+    return res.status(500).json({
+      message: "Failed to calculate BOM order data",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   __test: {
     buildGlassDimensionEffects,
@@ -2248,6 +2271,7 @@ module.exports = {
   },
   deleteConfig,
   getBeadingCatalog,
+  getBomData,
   generateBomPdf,
   generateCuttingSchedulePdf,
   renderBomPdfBuffer,

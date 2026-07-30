@@ -18,6 +18,7 @@ const {
    generateElevationPdfController
 } = require("../controllers/quotationController");
 const {
+  getBomData,
   generateBomPdf,
   generateCuttingSchedulePdf,
 } = require("../controllers/cuttingScheduleController");
@@ -71,6 +72,7 @@ router.delete("/:id", isUser, deleteQuotationById);
 router.get("/:id/pdf", isUser, generateQuotationPdfController);
 router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
 router.get("/:id/bom", isUser, generateBomPdf);
+router.get("/:id/bom-data", isUser, getBomData);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
 router.get("/chart/:userId",getChartData);
 router.get("/stats/:userId", getDashboardStats);
