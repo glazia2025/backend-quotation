@@ -1032,6 +1032,12 @@ const addBomRow = (groups, row) => {
   existing.amount = round2(existing.amount + toNumber(row.amount));
 };
 
+const getScheduledLineQuantity = (formula, variables, itemQuantity) =>
+  round3(
+    evaluateFormula(formula || "1", { ...variables, Q: 1 }) *
+      Math.max(1, toNumber(itemQuantity, 1))
+  );
+
 const buildBomData = async (quotation) => {
   const sourceItems = itemRowsForSchedule(quotation);
   const keys = uniqueConfigKeys(sourceItems);
@@ -1081,13 +1087,16 @@ const buildBomData = async (quotation) => {
     const schedule = config ? findScheduleLines(config, getItemScheduleKey(item, config)) : null;
     if (!schedule?.lines?.length) continue;
 
-    const itemQuantity = Math.max(1, toNumber(item.quantity, 1));
+    const itemQuantity = Math.max(1, Math.round(toNumber(item.quantity, 1)));
     const frameWidth = toNumber(item.frameWidth, toNumber(item.width));
     const frameHeight = toNumber(item.frameHeight, toNumber(item.height));
     const variables = {
       W: frameWidth,
       H: frameHeight,
-      Q: itemQuantity,
+      // BOM cutting is simulated one physical quotation item at a time. Keeping
+      // Q at 1 makes configured formulas describe one item and avoids turning
+      // repeated items into a single bulk cutting request.
+      Q: 1,
       AREA:
         toNumber(item.frameArea) ||
         (frameWidth > 0 && frameHeight > 0
@@ -1101,7 +1110,8 @@ const buildBomData = async (quotation) => {
       `${item.systemType}||${item.series}||${item.description}||${glassSpec}`
       ];
 
-    for (const line of schedule.lines) {
+    for (let itemIndex = 0; itemIndex < itemQuantity; itemIndex += 1) {
+      for (const line of schedule.lines) {
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
       let dimension = "";
       if (
@@ -1126,25 +1136,18 @@ const buildBomData = async (quotation) => {
         const adjustment = getProfileAdjustment(product, pricingContext);
         const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
         const lengthMm = toNumber(dimension, toNumber(product?.length, 0));
-const pieceLength = lengthMm +10;
-const stockLength = toNumber(product?.length);
-const result = consumeProfileLength(
-  line.sapCode,
-  pieceLength,
-  qty,
-  stockLength,
-  leftoverBySap
-);
- const weightKg = round3(result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm, 0));
-console.log({
-  sap: line.sapCode,
-  qty,
-  lengthMm,
-  stockLength,
-  pieceLength,
-  result,
-  leftover: leftoverBySap[line.sapCode],
-});
+        const pieceLength = lengthMm + 10;
+        const stockLength = toNumber(product?.length);
+        const result = consumeProfileLength(
+          line.sapCode,
+          pieceLength,
+          qty,
+          stockLength,
+          leftoverBySap
+        );
+        const weightKg = round3(
+          result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm, 0)
+        );
         addBomRow(groups, {
           type: "Profile",
           system: item.systemType,
@@ -1179,8 +1182,8 @@ console.log({
         });
         continue;
       }
-    }
-    if (glassBeadingConfig) {
+      }
+      if (glassBeadingConfig) {
       (glassBeadingConfig.beadings || []).forEach((beading) => {
         const beadingProduct = catalogProducts.get(
           catalogProductKey({
@@ -1192,32 +1195,18 @@ console.log({
           profileOption,
           beading.sapCode
         );
-const lengthMm = toNumber(
-  evaluateFormula(beading.formula, variables)
-);
-
-const pieceLength = lengthMm + 10;
-const pieceQty = toNumber(beading.quantity, 1);
-
-const stockLength = toNumber(beadingProduct?.length);
-
-const result = consumeProfileLength(
-  beading.sapCode,
-  pieceLength,
-  pieceQty,
-  stockLength,
-  leftoverBySap
-);
-console.log({
-  sap: beading.sapCode,
-  lengthMm,
-  pieceLength,
-  stockLength,
-  result,
-  leftover: leftoverBySap[beading.sapCode],
-});
-
-const beadingAmount =round2(result.profilesUsed * beadingRate);
+        const lengthMm = toNumber(evaluateFormula(beading.formula, variables));
+        const pieceLength = lengthMm + 10;
+        const pieceQty = toNumber(beading.quantity, 1);
+        const stockLength = toNumber(beadingProduct?.length);
+        const result = consumeProfileLength(
+          beading.sapCode,
+          pieceLength,
+          pieceQty,
+          stockLength,
+          leftoverBySap
+        );
+        const beadingAmount = round2(result.profilesUsed * beadingRate);
         addBomRow(groups, {
           type: "Beading",
           system: item.systemType,
@@ -1231,8 +1220,8 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
           amount: beadingAmount,
         });
       });
-    }
-    if (glassBeadingConfig) {
+      }
+      if (glassBeadingConfig) {
 (glassBeadingConfig.gaskets || []).forEach((gasket) => {
   const gasketProduct = catalogProducts.get(
     catalogProductKey({
@@ -1269,23 +1258,27 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
   });
 });
 
-}
+      }
+    }
   }
 
   for (const entry of joinEntries) {
     const config =
       mullionCouplerConfigMap[`${entry.systemType}||${entry.series}`];
     const lines = getJoinLinesForOrientation(entry, config);
-    const parentQuantity = Math.max(1, toNumber(entry.parent.quantity, 1));
-    const variables = getJoinFormulaVariables(entry, parentQuantity);
+    const parentQuantity = Math.max(
+      1,
+      Math.round(toNumber(entry.parent.quantity, 1))
+    );
+    const variables = getJoinFormulaVariables(entry, 1);
 
-    for (const line of lines) {
+    for (let itemIndex = 0; itemIndex < parentQuantity; itemIndex += 1) {
+      for (const line of lines) {
       const product = catalogProducts.get(
         catalogProductKey({ itemType: "profile", sapCode: line.sapCode })
       );
       const lengthMm = toNumber(evaluateFormula(line.formula || "H", variables));
-      const pieceQuantity =
-        Math.max(0, toNumber(line.quantity, 1)) * parentQuantity;
+      const pieceQuantity = Math.max(0, toNumber(line.quantity, 1));
       const result = consumeProfileLength(
         line.sapCode,
         lengthMm + 10,
@@ -1312,6 +1305,7 @@ const beadingAmount =round2(result.profilesUsed * beadingRate);
         rate,
         amount: rate * weightKg,
       });
+      }
     }
   }
 
@@ -1394,7 +1388,9 @@ const buildScheduleData = async (quotation) => {
     const variables = {
       W: frameWidth,
       H: frameHeight,
-      Q: quantity,
+      // Line formulas represent the quantity for one configured item. The
+      // quotation item quantity is applied explicitly to every output row.
+      Q: 1,
       AREA:
         toNumber(item.frameArea) ||
         (frameWidth > 0 && frameHeight > 0
@@ -1426,7 +1422,11 @@ const buildScheduleData = async (quotation) => {
       const isFirstGlassRefLine =
         line.itemType === "glass" && !processedGlassRefs.has(glassRef);
       const catalogProduct = catalogProducts.get(catalogProductKey(line));
-      const qty = evaluateFormula(line.quantityFormula || "1", variables);
+      const qty = getScheduledLineQuantity(
+        line.quantityFormula,
+        variables,
+        quantity
+      );
       let dimension = "";
       if (
         (line.itemType === "profile" || line.itemType === "glass") &&
@@ -1523,7 +1523,7 @@ const buildScheduleData = async (quotation) => {
             sapCode: beading.sapCode,
             dimension: beadingDimension,
             cutAngle: "",
-            quantity: beading.quantity,
+            quantity: round3(toNumber(beading.quantity, 1) * quantity),
             unit: "sqft",
             position: "--",
             sortOrder: (line.sortOrder || 0) + 1,
@@ -1554,7 +1554,7 @@ const buildScheduleData = async (quotation) => {
             sapCode: gasket.sapCode,
             dimension: gasketDimension,
             cutAngle: "",
-            quantity: 1,
+            quantity: round3(quantity),
             unit: "sqft",
             position: "--",
             sortOrder: (line.sortOrder || 0) + 2,
@@ -2268,6 +2268,8 @@ module.exports = {
     getJoinFormulaVariables,
     itemRowsForSchedule,
     getJoinLinesForOrientation,
+    getScheduledLineQuantity,
+    consumeProfileLength,
   },
   deleteConfig,
   getBeadingCatalog,
