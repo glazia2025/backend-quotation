@@ -18,10 +18,6 @@ const {
   listOptionSets,
   updateOptionSet,
   deleteOptionSet,
-  createAreaSlab,
-  listAreaSlabs,
-  updateAreaSlab,
-  deleteAreaSlab,
   createBaseRate,
   listBaseRates,
   updateBaseRate,
@@ -59,6 +55,7 @@ const {
   listConfigs: listMullionCouplerConfigs,
   upsertConfig: upsertMullionCouplerConfig,
 } = require("../controllers/mullionCouplerController");
+const hardwareLinking = require("../controllers/hardwareLinkingController");
 
 // Systems
 router.post("/systems", isAdmin, createSystem);
@@ -77,12 +74,6 @@ router.post("/option-sets", isAdmin, createOptionSet);
 router.get("/option-sets", isAdmin, listOptionSets);
 router.put("/option-sets/:id", isAdmin, updateOptionSet);
 router.delete("/option-sets/:id", isAdmin, deleteOptionSet);
-
-// Area slabs
-router.post("/area-slabs", isAdmin, createAreaSlab);
-router.get("/area-slabs", isAdmin, listAreaSlabs);
-router.put("/area-slabs/:id", isAdmin, updateAreaSlab);
-router.delete("/area-slabs/:id", isAdmin, deleteAreaSlab);
 
 // Base rates
 router.post("/base-rates", isAdmin, createBaseRate);
@@ -148,6 +139,13 @@ router.get("/mullion-coupler/configs", isAdmin, listMullionCouplerConfigs);
 router.get("/mullion-coupler/configs/:id", isAdmin, getMullionCouplerConfig);
 router.post("/mullion-coupler/configs", isAdmin, upsertMullionCouplerConfig);
 router.delete("/mullion-coupler/configs/:id", isAdmin, deleteMullionCouplerConfig);
+
+router.get("/hardware-linking/descriptions", isAdmin, hardwareLinking.listCatalog);
+router.get("/hardware-linking/options", isAdmin, hardwareLinking.getFormOptions);
+router.get("/hardware-linking/configs", isAdmin, hardwareLinking.listConfigs);
+router.get("/hardware-linking/configs/:id", isAdmin, hardwareLinking.getConfig);
+router.post("/hardware-linking/configs", isAdmin, hardwareLinking.upsertConfig);
+router.delete("/hardware-linking/configs/:id", isAdmin, hardwareLinking.deleteConfig);
 
 router.get(
   "/",

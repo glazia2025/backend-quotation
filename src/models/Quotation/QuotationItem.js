@@ -11,6 +11,11 @@ const itemFields = {
   description: String,
   colorFinish: String,
   glassSpec: String,
+  hardwareOpeningType: {
+    type: String,
+    enum: ["", "hinges", "frictionStay"],
+    default: "",
+  },
   handleType: String,
   handleColor: String,
   handleCount: { type: Number, default: 0 },
@@ -42,6 +47,19 @@ const itemFields = {
   archHeightRatio: Number,
   baseRate: { type: Number, default: 0 },
   areaSlabIndex: { type: Number, default: 0 },
+  rateSource: {
+    type: String,
+    enum: ["calculated", "manual", "legacy"],
+    default: "legacy",
+  },
+  calculatedBaseRate: Number,
+  calculatedFinalRate: Number,
+  nalcoPriceUsed: Number,
+  nalcoRatePerKg: Number,
+  profileWeightKg: Number,
+  profileMaterialValue: Number,
+  rateCalculatedAt: Date,
+  rateCalculationVersion: Number,
   configuratorLayout: mongoose.Schema.Types.Mixed,
 };
 

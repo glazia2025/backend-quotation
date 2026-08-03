@@ -293,6 +293,9 @@ const deleteAreaSlab = async (req, res) => {
 const createBaseRate = async (req, res) => {
   try {
     const payload = { ...req.body };
+    if (payload.systemType !== "Louvers") {
+      return res.status(400).json({ message: "Base rates are retained for Louvers only" });
+    }
     payload.rates = normalizeThreeRates(payload.rates);
     //  Louvers special logic
     if (payload.systemType === "Louvers") {
@@ -318,10 +321,7 @@ const createBaseRate = async (req, res) => {
 
 const listBaseRates = async (req, res) => {
   try {
-    const filter = {};
-    if (req.query.systemType) filter.systemType = req.query.systemType;
-    if (req.query.series) filter.series = req.query.series;
-    if (req.query.description) filter.description = req.query.description;
+    const filter = { systemType: "Louvers" };
     const baseRates = await BaseRate.find(filter).sort({ systemType: 1, series: 1, description: 1 }).lean();
     res.json({ baseRates });
   } catch (error) {
@@ -332,6 +332,9 @@ const listBaseRates = async (req, res) => {
 const updateBaseRate = async (req, res) => {
   try {
     const existing = await BaseRate.findById(req.params.id);
+    if (!existing || existing.systemType !== "Louvers") {
+      return res.status(404).json({ message: "Louvers rate not found" });
+    }
     const payload = { ...req.body };
 
     if (payload.rates !== undefined) {
@@ -368,7 +371,10 @@ const updateBaseRate = async (req, res) => {
 
 const deleteBaseRate = async (req, res) => {
   try {
-    const baseRate = await BaseRate.findByIdAndDelete(req.params.id);
+    const baseRate = await BaseRate.findOneAndDelete({
+      _id: req.params.id,
+      systemType: "Louvers",
+    });
     if (!baseRate) return res.status(404).json({ message: "Base rate not found" });
     res.json({ message: "Deleted" });
   } catch (error) {

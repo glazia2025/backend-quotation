@@ -8,7 +8,7 @@ const {
   getSeries,
   getDescriptions,
   getOptionLists,
-  previewRate,
+  calculateRate,
   createQuotation,
   listQuotations,
   getQuotationById,
@@ -19,6 +19,7 @@ const {
 } = require("../controllers/quotationController");
 const {
   getBomData,
+  getOptimizedFinal,
   generateBomPdf,
   generateCuttingSchedulePdf,
 } = require("../controllers/cuttingScheduleController");
@@ -55,7 +56,7 @@ router.get("/louvers/rates", async (req, res) => {
   }
 });
 router.get("/options", getOptionLists);
-router.post("/rate-preview", previewRate);
+router.post("/calculate-rate", isUser, calculateRate);
 router.post("/", isUser, createQuotation);
 router.get("/", isUser, listQuotations);
 router.get("/config", isUser, getQuotationConfig);
@@ -73,6 +74,7 @@ router.get("/:id/pdf", isUser, generateQuotationPdfController);
 router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
 router.get("/:id/bom", isUser, generateBomPdf);
 router.get("/:id/bom-data", isUser, getBomData);
+router.get("/:id/optimized-final", isUser, getOptimizedFinal);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
 router.get("/chart/:userId",getChartData);
 router.get("/stats/:userId", getDashboardStats);

@@ -5,12 +5,10 @@ const User = require("../models/User");
 const System = require("../models/Quotation/System");
 const Series = require("../models/Quotation/Series");
 const OptionSet = require("../models/Quotation/OptionSet");
-const AreaSlab = require("../models/Quotation/AreaSlab");
 const BaseRate = require("../models/Quotation/BaseRate");
 const HandleRule = require("../models/Quotation/HandleRule");
 const HandleOption = require("../models/Quotation/HandleOption");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
-const UserDescriptionRate = require("../models/Quotation/UserDescriptionRate");
 const { extractAuthToken } = require("../utils/authCookies");
 const { verifyJwt } = require("../utils/jwt");
 const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
@@ -25,6 +23,7 @@ const {
   deleteQuotationItems,
   hydrateQuotationItems,
 } = require("../utils/quotationItems");
+const { calculateQuotationItemRates } = require("../services/quotationRateService");
 const {
   collectQuotationImageKeys,
   deleteQuotationImages,
@@ -162,47 +161,6 @@ const resolveHandleInfo = (description, seriesMeta, rules, systemType, series) =
   return { types: [], count: 0 };
 };
 
-const getAreaSlabsSorted = async () => {
-  const slabs = await AreaSlab.find({}).sort({ order: 1, max: 1 }).lean();
-  if (slabs.length >= 3) return slabs.slice(0, 3);
-  const defaults = [
-    { label: "Small", max: 10 },
-    { label: "Medium", max: 20 },
-    { label: "Large", max: Number.MAX_SAFE_INTEGER },
-  ];
-  return [...slabs, ...defaults.slice(slabs.length, 3)];
-};
-
-const resolveAreaSlabIndex = (area, slabs) => {
-  const safeArea = numberOr(area, 0);
-  const slab = slabs.find((item) => safeArea <= item.max);
-  if (slab) return slabs.indexOf(slab);
-  return slabs.length ? slabs.length - 1 : 0;
-};
-
-const resolveBaseRate = async (systemType, series, description, area) => {
-  const slabs = await getAreaSlabsSorted();
-  // const baseRateDoc = await BaseRate.findOne({ systemType, series, description }).lean();
-  let baseRateDoc;
-  //  Louvers special case
-  if (systemType === "Louvers") {
-    baseRateDoc = await BaseRate.findOne({ systemType }).lean();
-  } else {
-    baseRateDoc = await BaseRate.findOne({
-      systemType,
-      series,
-      description,
-    }).lean();
-  }
-  const areaIndex = Math.min(resolveAreaSlabIndex(area, slabs), 2);
-  const rates = Array.isArray(baseRateDoc?.rates)
-    ? [...baseRateDoc.rates, 0, 0, 0].slice(0, 3)
-    : [0, 0, 0];
-  const baseRate = rates[areaIndex] ?? 0;
-
-  return { baseRate, areaIndex, slabs: slabs.slice(0, 3) };
-};
-
 const getSystems = async (req, res) => {
   try {
     const systems = await System.find({}, "name").sort({ name: 1 }).lean();
@@ -225,15 +183,7 @@ const getSeries = async (req, res) => {
       systemDoc ? { system: systemDoc._id } : {},
       "name"
     ).lean();
-    const seriesFromRates = await BaseRate.find(
-      { systemType },
-      "series"
-    ).lean();
-
-    const series = unique([
-      ...seriesFromDb.map((item) => item.name),
-      ...seriesFromRates.map((item) => item.series),
-    ]);
+    const series = unique(seriesFromDb.map((item) => item.name));
 
     res.json({ series });
   } catch (error) {
@@ -262,7 +212,6 @@ const getDescriptions = async (req, res) => {
   }
 
   try {
-    const userId = getOptionalUserId(req);
     const systemDoc = await System.findOne({ name: systemType }).lean();
     const seriesDoc = await Series.findOne(
       systemDoc ? { name: series, system: systemDoc._id } : { name: series }
@@ -271,43 +220,14 @@ const getDescriptions = async (req, res) => {
       .lean();
 
     console.log('systemDoc, seriesDoc', systemDoc, seriesDoc);
-    const rateDocs = await BaseRate.find(
-      { systemType, series },
-      "description rates"
-    ).lean();
-
-    const userRateDocs = userId
-      ? await UserDescriptionRate.find(
-        { user: userId, systemType, series },
-        "description rates"
-      ).lean()
-      : [];
-
-    console.log('rateDescriptions', rateDocs);
-
     const dbDescriptions = (seriesDoc?.descriptions || []).map(
       (item) => item.name
     );
-
-    const descriptionList = unique([
-      ...dbDescriptions,
-      ...rateDocs.map((item) => item.description),
-      ...userRateDocs.map((item) => item.description),
-    ]);
+    const descriptionList = unique(dbDescriptions);
 
     const handleRules = await HandleRule.find({
       description: { $in: descriptionList },
     }).lean();
-
-    const rateMap = rateDocs.reduce((acc, doc) => {
-      acc[doc.description] = doc.rates || [];
-      return acc;
-    }, {});
-
-    const userRateMap = userRateDocs.reduce((acc, doc) => {
-      acc[doc.description] = doc.rates || [];
-      return acc;
-    }, {});
 
     const descriptions = descriptionList.map((item) => {
       const handleInfo = resolveHandleInfo(
@@ -317,16 +237,11 @@ const getDescriptions = async (req, res) => {
         systemType,
         series
       );
-      const adminRates = Array.isArray(rateMap[item]) ? rateMap[item] : [0, 0, 0];
-      const userRates = Array.isArray(userRateMap[item]) ? userRateMap[item] : [0, 0, 0];
-      const effectiveRates = [0, 1, 2].map((idx) =>
-        effectiveRateWithAdminFallback(adminRates[idx], userRates[idx])
-      );
       return {
         name: item,
         handleTypes: handleInfo.types,
         defaultHandleCount: handleInfo.count,
-        baseRates: effectiveRates,
+        baseRates: [0, 0, 0],
       };
     });
 
@@ -405,63 +320,18 @@ const getOptionLists = async (req, res) => {
   }
 };
 
-const previewRate = async (req, res) => {
-  const {
-    systemType,
-    series,
-    description,
-    width,
-    height,
-    area: areaFromBody,
-    quantity = 1,
-  } = req.body;
-
-  if (!systemType || !series || !description) {
+const calculateRate = async (req, res) => {
+  try {
+    const items = await calculateQuotationItemRates({
+      items: req.body?.items,
+      userId: req.user?.userId,
+    });
+    return res.status(200).json({ items });
+  } catch (error) {
     return res.status(400).json({
-      message: "systemType, series and description are required to calculate",
+      message: error.message || "Unable to calculate quotation rate",
     });
   }
-
-  const computedArea =
-    numberOr(areaFromBody, 0) || numberOr(width, 0) * numberOr(height, 0);
-  const { baseRate, areaIndex, slabs } = await resolveBaseRate(
-    systemType,
-    series,
-    description,
-    computedArea
-  );
-
-  const handleRules = await HandleRule.find({ description }).lean();
-  const handleInfo = resolveHandleInfo(
-    description,
-    null,
-    handleRules,
-    systemType,
-    series
-  );
-
-  // const amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
-  let amount = baseRate * (computedArea || 1) * numberOr(quantity, 1);
-  //  Arch charge
-  if (
-    req.body.systemType?.toLowerCase() === "casement" &&
-    req.body.archType &&
-    req.body.archType !== "none"
-  ) {
-    amount += 5000;
-  }
-
-  res.json({
-    rate: baseRate,
-    amount,
-    area: computedArea,
-    areaSlabIndex: areaIndex,
-    slabs,
-    handleInfo: {
-      types: handleInfo.types,
-      defaultHandleCount: handleInfo.count,
-    },
-  });
 };
 
 const createQuotation = async (req, res) => {
@@ -2356,7 +2226,7 @@ module.exports = {
   getSeries,
   getDescriptions,
   getOptionLists,
-  previewRate,
+  calculateRate,
   createQuotation,
   listQuotations,
   getQuotationById,

@@ -5,6 +5,8 @@ const path = require("path");
 const CuttingScheduleConfig = require("../models/Quotation/CuttingScheduleConfig");
 const GlassBeadingConfig = require("../models/Quotation/GlassBeadingConfig");
 const MullionCouplerConfig = require("../models/Quotation/MullionCouplerConfig");
+const HardwareLinkingConfig = require("../models/Quotation/HardwareLinkingConfig");
+const Hardware = require("../models/Hardware");
 const OptionSet = require("../models/Quotation/OptionSet");
 const Quotation = require("../models/Quotation/Quotation");
 const ProfileOption = require("../models/ProfileOptions");
@@ -16,6 +18,7 @@ const { getOrGeneratePdf } = require("../utils/pdfCache");
 const { restoreRateMap } = require("../utils/rateMapUtils");
 const { hydrateQuotationItems } = require("../utils/quotationItems");
 const { inlineQuotationImages } = require("../utils/quotationImages");
+const { resolveLinkedHardware } = require("../utils/hardwareLinking");
 const {
   catalogProductKey,
   escapeHtml,
@@ -1044,11 +1047,14 @@ const buildBomData = async (quotation) => {
   const joinEntries = combinationJoinEntries(quotation);
   const joinKeys = uniqueMullionCouplerKeys(joinEntries);
 
-  const [configs, glassBeadingConfigs, mullionCouplerConfigs, pricingContext, profileOption] = await Promise.all([
+  const [configs, glassBeadingConfigs, hardwareLinkingConfigs, mullionCouplerConfigs, pricingContext, profileOption, hardwareCatalog] = await Promise.all([
     CuttingScheduleConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
     }).lean(),
     GlassBeadingConfig.find({
+      $or: keys.length ? keys : [{ systemType: "__none__" }],
+    }).lean(),
+    HardwareLinkingConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
     }).lean(),
     MullionCouplerConfig.find({
@@ -1056,6 +1062,7 @@ const buildBomData = async (quotation) => {
     }).lean(),
     getUserPricingContext(quotation.user),
     ProfileOption.findOne().lean(),
+    Hardware.find({}).lean(),
   ]);
 
   const configMap = configs.reduce((acc, config) => {
@@ -1069,6 +1076,11 @@ const buildBomData = async (quotation) => {
     acc[key] = config;
     return acc;
   }, {});
+  const hardwareLinkingConfigMap = hardwareLinkingConfigs.reduce((acc, config) => {
+    acc[`${config.systemType}||${config.series}||${config.description}`] = config;
+    return acc;
+  }, {});
+  const hardwareByCode = new Map(hardwareCatalog.map((row) => [String(row.sapCode || "").trim().toUpperCase(), row]));
   const mullionCouplerConfigMap = mullionCouplerConfigs.reduce((acc, config) => {
     acc[`${config.systemType}||${config.series}`] = config;
     return acc;
@@ -1085,7 +1097,8 @@ const buildBomData = async (quotation) => {
     const key = `${item.systemType || ""}||${item.series || ""}||${item.description || ""}`;
     const config = configMap[key];
     const schedule = config ? findScheduleLines(config, getItemScheduleKey(item, config)) : null;
-    if (!schedule?.lines?.length) continue;
+    const hardwareLinkingConfig = hardwareLinkingConfigMap[key];
+    if (!schedule?.lines?.length && !hardwareLinkingConfig) continue;
 
     const itemQuantity = Math.max(1, Math.round(toNumber(item.quantity, 1)));
     const frameWidth = toNumber(item.frameWidth, toNumber(item.width));
@@ -1111,7 +1124,7 @@ const buildBomData = async (quotation) => {
       ];
 
     for (let itemIndex = 0; itemIndex < itemQuantity; itemIndex += 1) {
-      for (const line of schedule.lines) {
+      for (const line of schedule?.lines || []) {
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
       let dimension = "";
       if (
@@ -1183,6 +1196,21 @@ const buildBomData = async (quotation) => {
         continue;
       }
       }
+      const linkedHardware = resolveLinkedHardware({
+        config: hardwareLinkingConfig, glassSpec,
+        widthMm: toNumber(item.width), heightMm: toNumber(item.height),
+        hardwareOpeningType: item.hardwareOpeningType,
+      });
+      linkedHardware.lines.forEach((line) => {
+        const product = hardwareByCode.get(String(line.sapCode).toUpperCase());
+        const rate = product ? round2(toNumber(product.rate) + getHardwareAdjustment(product, pricingContext)) : 0;
+        addBomRow(groups, {
+          type: "Hardware", system: item.systemType, series: item.series,
+          description: line.description || product?.perticular || line.sapCode,
+          itemCode: line.sapCode, quantity: line.quantity, unit: product?.system || "Pcs",
+          measureLabel: `${linkedHardware.shutterWeightKg} kg/shutter`, rate, amount: rate * line.quantity,
+        });
+      });
       if (glassBeadingConfig) {
       (glassBeadingConfig.beadings || []).forEach((beading) => {
         const beadingProduct = catalogProducts.get(
@@ -1343,11 +1371,14 @@ const buildScheduleData = async (quotation) => {
   const joinEntries = combinationJoinEntries(quotation);
   const joinKeys = uniqueMullionCouplerKeys(joinEntries);
 
-  const [configs, glassBeadingConfigs, mullionCouplerConfigs] = await Promise.all([
+  const [configs, glassBeadingConfigs, hardwareLinkingConfigs, mullionCouplerConfigs] = await Promise.all([
     CuttingScheduleConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
     }).lean(),
     GlassBeadingConfig.find({
+      $or: keys.length ? keys : [{ systemType: "__none__" }],
+    }).lean(),
+    HardwareLinkingConfig.find({
       $or: keys.length ? keys : [{ systemType: "__none__" }],
     }).lean(),
     MullionCouplerConfig.find({
@@ -1363,6 +1394,10 @@ const buildScheduleData = async (quotation) => {
     const key = `${config.systemType}||${config.series}||${config.description}||${config.glassSpec}`;
 
     acc[key] = config;
+    return acc;
+  }, {});
+  const hardwareLinkingConfigMap = hardwareLinkingConfigs.reduce((acc, config) => {
+    acc[`${config.systemType}||${config.series}||${config.description}`] = config;
     return acc;
   }, {});
   const mullionCouplerConfigMap = mullionCouplerConfigs.reduce((acc, config) => {
@@ -1566,6 +1601,16 @@ const buildScheduleData = async (quotation) => {
     }
     rows.push(...beadingRows);
     rows.push(...gasketRows);
+    const linkedHardware = resolveLinkedHardware({
+      config: hardwareLinkingConfigMap[key], glassSpec: item.glassSpec,
+      widthMm: toNumber(item.width), heightMm: toNumber(item.height),
+      hardwareOpeningType: item.hardwareOpeningType,
+    });
+    linkedHardware.lines.forEach((line, index) => rows.push({
+      itemType: "hardware", description: line.description, sapCode: line.sapCode,
+      dimension: "", cutAngle: "", quantity: round3(line.quantity * quantity), unit: "Pcs",
+      position: `${linkedHardware.shutterWeightKg} kg/shutter`, sortOrder: 1000 + index,
+    }));
     // const sortedRows = rows.sort((a, b) => a.sortOrder - b.sortOrder);
     const sortedRows = compileGlassRows(rows);
     if (!sortedRows.length && !notes.length) {
@@ -2256,6 +2301,25 @@ const getBomData = async (req, res) => {
   }
 };
 
+const getOptimizedFinal = async (req, res) => {
+  try {
+    const quotation = await findQuotationForUser(req, res, true);
+    if (!quotation) return null;
+    const data = await buildBomData(quotation);
+    return res.status(200).json({
+      optimizedFinal: round2(data.totals.grand),
+      nalcoPrice: data.nalcoPrice,
+      calculatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("getOptimizedFinal error", error);
+    return res.status(500).json({
+      message: "Failed to calculate optimized final",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   __test: {
     buildGlassDimensionEffects,
@@ -2274,6 +2338,7 @@ module.exports = {
   deleteConfig,
   getBeadingCatalog,
   getBomData,
+  getOptimizedFinal,
   generateBomPdf,
   generateCuttingSchedulePdf,
   renderBomPdfBuffer,

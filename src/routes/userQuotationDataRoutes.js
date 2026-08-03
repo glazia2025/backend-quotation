@@ -1,10 +1,6 @@
 const express = require("express");
 const isUser = require("../middleware/userMiddleware");
 const {
-  upsertDescriptionRate,
-  listDescriptionRates,
-  updateDescriptionRate,
-  deleteDescriptionRate,
   listOptionSets,
   replaceOptionSet,
   upsertOptionItem,
@@ -23,11 +19,6 @@ const {
 const router = express.Router();
 
 router.use(isUser);
-
-router.post("/description-rates", upsertDescriptionRate);
-router.get("/description-rates", listDescriptionRates);
-router.put("/description-rates/:id", updateDescriptionRate);
-router.delete("/description-rates/:id", deleteDescriptionRate);
 
 router.get("/option-sets", listOptionSets);
 router.put("/option-sets/:type", replaceOptionSet);
