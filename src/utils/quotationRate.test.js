@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   __test: {
     calculateProfileMaterialBaseRate,
+    calculateJoinMaterialRate,
     resolveProfileAdjustment,
     scheduleKeyForItem,
   },
@@ -50,4 +51,39 @@ test("cutting schedule profile weight produces a per-square-foot base rate", () 
   assert.equal(result.totalWeightKg, 4.04);
   assert.equal(result.materialValue, 1414);
   assert.equal(result.baseRate, 141.4);
+});
+
+test("an unconfigured optional mullion or coupler is excluded from the rate", () => {
+  const result = calculateJoinMaterialRate({
+    item: { joinType: "Coupler", series: "40mm", area: 10 },
+    lines: undefined,
+    productsByCode: new Map(),
+    profileMetadataByCode: new Map(),
+    profilePricing: {},
+    nalcoPrice: 250000,
+  });
+
+  assert.equal(result.materialValue, 0);
+  assert.equal(result.baseRate, 0);
+  assert.deepEqual(result.profiles, []);
+  assert.match(result.warnings[0], /excluded from rate/);
+});
+
+test("a missing optional join profile does not prevent configured profiles from pricing", () => {
+  const result = calculateJoinMaterialRate({
+    item: { joinType: "Coupler", series: "40mm", height: 1000, area: 10 },
+    lines: [
+      { sapCode: "MISSING", formula: "H" },
+      { sapCode: "C-1", formula: "H" },
+    ],
+    productsByCode: new Map([["C-1", { sapCode: "C-1", kgm: 2 }]]),
+    profileMetadataByCode: new Map(),
+    profilePricing: {},
+    nalcoPrice: 250000,
+  });
+
+  assert.equal(result.profiles.length, 1);
+  assert.equal(result.materialValue, 707);
+  assert.equal(result.baseRate, 70.7);
+  assert.match(result.warnings[0], /MISSING.*excluded from rate/);
 });

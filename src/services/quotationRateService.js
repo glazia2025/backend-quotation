@@ -228,6 +228,56 @@ const calculateProfileMaterialBaseRate = ({
   };
 };
 
+const calculateJoinMaterialRate = ({
+  item,
+  lines,
+  productsByCode,
+  profileMetadataByCode,
+  profilePricing,
+  nalcoPrice,
+}) => {
+  const variables = {
+    W: toNumber(item.width),
+    H: toNumber(item.height),
+    AREA: toNumber(item.area),
+    Q: 1,
+  };
+  const profiles = [];
+  const warnings = [];
+  let materialValue = 0;
+  let totalWeightKg = 0;
+
+  if (!Array.isArray(lines) || !lines.length) {
+    warnings.push(`${item.joinType || "Join"} pricing is not configured for ${item.series || "this series"}; excluded from rate`);
+  } else {
+    lines.forEach((line) => {
+      const code = String(line.sapCode || "").trim().toUpperCase();
+      const metadata = profileMetadataByCode.get(code) || productsByCode.get(code);
+      if (!metadata) {
+        warnings.push(`${item.joinType || "Join"} profile ${line.sapCode || "unknown"} was not found; excluded from rate`);
+        return;
+      }
+      const lengthMm = toNumber(evaluateFormula(line.formula || "H", variables)) + CUT_ALLOWANCE_MM;
+      const weightKg = round3((lengthMm / 1000) * toNumber(metadata.kgm) * Math.max(1, toNumber(line.quantity, 1)));
+      const ratePerKg = round2(nalcoPrice / 1000 + resolveProfileAdjustment(profilePricing, metadata));
+      const amount = round2(weightKg * ratePerKg);
+      materialValue += amount;
+      totalWeightKg += weightKg;
+      profiles.push({ sapCode: line.sapCode, weightKg, ratePerKg, amount });
+    });
+  }
+
+  return {
+    baseRate: toNumber(item.area) > 0 ? round2(materialValue / toNumber(item.area)) : 0,
+    materialValue: round2(materialValue),
+    area: toNumber(item.area),
+    totalWeightKg: round3(totalWeightKg),
+    profiles,
+    otherMaterials: [],
+    warnings,
+  };
+};
+
 const calculateQuotationItemRates = async ({ items, userId }) => {
   const sourceItems = Array.isArray(items) ? items : [];
   if (!sourceItems.length) throw new Error("At least one item is required");
@@ -281,31 +331,16 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
     if (item.itemType === "join") {
       const config = mullionConfigMap.get(`${item.systemType}||${item.series}`);
       const lines = item.joinType === "Mullion" ? config?.mullions : config?.couplers;
-      if (!lines?.length) throw new Error(`${item.joinType} pricing is not configured for ${item.series}`);
-      const variables = { W: toNumber(item.width), H: toNumber(item.height), AREA: toNumber(item.area), Q: 1 };
-      let materialValue = 0;
-      let totalWeightKg = 0;
-      const profiles = lines.map((line) => {
-        const code = String(line.sapCode || "").trim().toUpperCase();
-        const metadata = profileMetadataByCode.get(code) || productsByCode.get(code);
-        if (!metadata) throw new Error(`${item.joinType} profile ${line.sapCode} was not found`);
-        const lengthMm = toNumber(evaluateFormula(line.formula || "H", variables)) + CUT_ALLOWANCE_MM;
-        const weightKg = round3((lengthMm / 1000) * toNumber(metadata.kgm) * Math.max(1, toNumber(line.quantity, 1)));
-        const ratePerKg = round2(nalcoPrice / 1000 + resolveProfileAdjustment(profilePricing, metadata));
-        const amount = round2(weightKg * ratePerKg);
-        materialValue += amount;
-        totalWeightKg += weightKg;
-        return { sapCode: line.sapCode, weightKg, ratePerKg, amount };
-      });
       return {
         clientId: String(item.clientId || "__joins__"),
-        baseRate: toNumber(item.area) > 0 ? round2(materialValue / toNumber(item.area)) : 0,
-        materialValue: round2(materialValue),
-        area: toNumber(item.area),
-        totalWeightKg: round3(totalWeightKg),
-        profiles,
-        otherMaterials: [],
-        warnings: [],
+        ...calculateJoinMaterialRate({
+          item,
+          lines,
+          productsByCode,
+          profileMetadataByCode,
+          profilePricing,
+          nalcoPrice,
+        }),
         nalcoPrice,
         nalcoRatePerKg: round2(nalcoPrice / 1000),
         calculatedAt: new Date().toISOString(),
@@ -343,6 +378,7 @@ module.exports = {
   calculateQuotationItemRates,
   __test: {
     calculateProfileMaterialBaseRate,
+    calculateJoinMaterialRate,
     resolveProfileAdjustment,
     scheduleKeyForItem,
   },
