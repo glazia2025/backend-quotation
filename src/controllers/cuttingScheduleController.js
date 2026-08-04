@@ -579,7 +579,7 @@ const getJoinLinesForOrientation = (entry, config) => {
       ? config?.mullions || []
       : config?.couplers || [];
   const dimensionVariable =
-    getJoinOrientation(entry) === "vertical" ? "H" : "W";
+    getJoinOrientation(entry) === "vertical" ? "W" : "H";
   const matchingLines = configuredLines.filter((line) =>
     new RegExp(`\\b${dimensionVariable}\\b`, "i").test(
       String(line.formula || "")

@@ -5,6 +5,7 @@ const {
   __test: {
     calculateProfileMaterialBaseRate,
     calculateJoinMaterialRate,
+    getJoinPricingLines,
     resolveProfileAdjustment,
     scheduleKeyForItem,
   },
@@ -86,4 +87,15 @@ test("a missing optional join profile does not prevent configured profiles from 
   assert.equal(result.materialValue, 707);
   assert.equal(result.baseRate, 70.7);
   assert.match(result.warnings[0], /MISSING.*excluded from rate/);
+});
+
+test("join pricing uses only formulas matching the divider orientation", () => {
+  const lines = [
+    { sapCode: "M-1", formula: "H-50" },
+    { sapCode: "M-1", formula: "W-50" },
+  ];
+
+  assert.deepEqual(getJoinPricingLines(lines, "vertical"), [lines[1]]);
+  assert.deepEqual(getJoinPricingLines(lines, "horizontal"), [lines[0]]);
+  assert.deepEqual(getJoinPricingLines(lines), lines);
 });

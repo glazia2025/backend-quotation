@@ -432,7 +432,7 @@ test("cutting schedule displays selected frame and shutter cut angles", () => {
   );
 });
 
-test("vertical joins use only H formulas and horizontal joins use only W formulas", () => {
+test("vertical joins use only W formulas and horizontal joins use only H formulas", () => {
   const config = {
     mullions: [
       { sapCode: "H-LINE", formula: "H - 50", quantity: 1 },
@@ -444,11 +444,11 @@ test("vertical joins use only H formulas and horizontal joins use only W formula
 
   assert.deepEqual(
     getJoinLinesForOrientation(vertical, config).map((line) => line.sapCode),
-    ["H-LINE"]
+    ["W-LINE"]
   );
   assert.deepEqual(
     getJoinLinesForOrientation(horizontal, config).map((line) => line.sapCode),
-    ["W-LINE"]
+    ["H-LINE"]
   );
 });
 

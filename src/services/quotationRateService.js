@@ -17,6 +17,20 @@ const CUT_ALLOWANCE_MM = 10;
 
 const round2 = (value) => Math.round(toNumber(value) * 100) / 100;
 
+const getJoinPricingLines = (lines, orientation) => {
+  const configuredLines = Array.isArray(lines) ? lines : [];
+  const dimensionVariable = orientation === "vertical"
+    ? "W"
+    : orientation === "horizontal"
+      ? "H"
+      : "";
+  if (!dimensionVariable) return configuredLines;
+  const matchingLines = configuredLines.filter((line) =>
+    new RegExp(`\\b${dimensionVariable}\\b`, "i").test(String(line.formula || ""))
+  );
+  return matchingLines.length ? matchingLines : configuredLines;
+};
+
 const getLatestNalcoPrice = async () => {
   const schema = new mongoose.Schema(
     { nalcoPrice: Number, date: Date },
@@ -330,7 +344,8 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
   return sourceItems.map((item) => {
     if (item.itemType === "join") {
       const config = mullionConfigMap.get(`${item.systemType}||${item.series}`);
-      const lines = item.joinType === "Mullion" ? config?.mullions : config?.couplers;
+      const configuredLines = item.joinType === "Mullion" ? config?.mullions : config?.couplers;
+      const lines = getJoinPricingLines(configuredLines, item.joinOrientation);
       return {
         clientId: String(item.clientId || "__joins__"),
         ...calculateJoinMaterialRate({
@@ -379,6 +394,7 @@ module.exports = {
   __test: {
     calculateProfileMaterialBaseRate,
     calculateJoinMaterialRate,
+    getJoinPricingLines,
     resolveProfileAdjustment,
     scheduleKeyForItem,
   },

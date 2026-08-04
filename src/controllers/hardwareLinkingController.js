@@ -23,7 +23,10 @@ const getFormOptions = async (_req, res) => {
   try {
     const [glassSet, hardware] = await Promise.all([
       OptionSet.findOne({ type: "glassSpec", system: { $exists: false } }).lean(),
-      Hardware.find({}).sort({ sapCode: 1 }).lean(),
+      Hardware.find({})
+        .select("sapCode perticular subCategory rate system moq")
+        .sort({ sapCode: 1 })
+        .lean(),
     ]);
     const values = glassSet?.values instanceof Map ? Object.fromEntries(glassSet.values) : (glassSet?.values || {});
     res.json({ glassSpecs: Object.keys(values), hardware });
