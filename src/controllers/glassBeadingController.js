@@ -15,7 +15,7 @@ const getDescriptionCatalog = async (_req, res) => {
       return acc;
     }, {});
 
-    const descriptions = series.flatMap((seriesItem) =>
+    const descriptions = series.filter((seriesItem) => seriesItem.system?.name !== "Exhaust Fan").flatMap((seriesItem) =>
       (seriesItem.descriptions || []).map((description) => {
         const systemType = seriesItem.system?.name || "";
         const key = `${systemType}||${seriesItem.name}||${description.name}`;

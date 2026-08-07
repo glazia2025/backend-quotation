@@ -5,6 +5,8 @@ const {
   __test: {
     calculateProfileMaterialBaseRate,
     calculateJoinMaterialRate,
+    cuttingScheduleIdentity,
+    cuttingScheduleMapKey,
     getJoinPricingLines,
     resolveProfileAdjustment,
     scheduleKeyForItem,
@@ -23,6 +25,18 @@ test("profile adjustment follows storefront precedence and default", () => {
 test("schedule key is derived from selected frame and shutter angles", () => {
   assert.equal(scheduleKeyForItem({ frameCutAngle: "45", shutterCutAngle: "90" }), "45_90");
   assert.equal(scheduleKeyForItem({ cuttingScheduleKey: "90_45" }), "90_45");
+});
+
+test("Louvers use one system-level cutting schedule identity", () => {
+  assert.deepEqual(
+    cuttingScheduleIdentity({ systemType: "Louvers", series: "legacy", description: "legacy" }),
+    { systemType: "Louvers", series: "", description: "" }
+  );
+  assert.equal(cuttingScheduleMapKey({ systemType: "Louvers" }), "Louvers||||");
+  assert.equal(
+    cuttingScheduleMapKey({ systemType: "Casement", series: "40mm", description: "Fix" }),
+    "Casement||40mm||Fix"
+  );
 });
 
 test("cutting schedule profile weight produces a per-square-foot base rate", () => {

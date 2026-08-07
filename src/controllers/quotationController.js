@@ -163,7 +163,7 @@ const resolveHandleInfo = (description, seriesMeta, rules, systemType, series) =
 
 const getSystems = async (req, res) => {
   try {
-    const systems = await System.find({}, "name").sort({ name: 1 }).lean();
+    const systems = await System.find({ name: { $ne: "Exhaust Fan" } }, "name").sort({ name: 1 }).lean();
     res.json({ systems: systems.map((item) => item.name) });
   } catch (error) {
     console.error("Error fetching systems:", error);
@@ -1194,7 +1194,7 @@ function renderSubItemsTable(subItems) {
                   <td>${escapeHtml(sub.refCode)}</td>
                   <td>${img}</td>
                   <td>${escapeHtml(sub.systemType)}</td>
-                  <td>${sub.systemType === "Exhaust Fan"? "40 mm": escapeHtml(sub.series)}</td>
+                  <td>${escapeHtml(sub.series)}</td>
                   <td>${sub.width || "-"}</td>
                   <td>${sub.height || "-"}</td>
                   <td>${sub.area.toFixed(2)}</td>
@@ -1688,22 +1688,22 @@ const pages = [
 
           .item-body {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 58% 42%;
             align-items: stretch;
           }
 
           .item-image-col {
-            min-height: 280px;
+            min-height: 330px;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 18px;
+            padding: 8px;
             border-right: 1px solid #d3d3d3;
           }
 
           .item-image-col img {
-            max-width: 100%;
-            max-height: 240px;
+            width: 100%;
+            max-height: 315px;
             object-fit: contain;
           }
 
@@ -1970,13 +1970,13 @@ function buildElevationHtml(data) {
           display: flex;
           justify-content: center;
           align-items: center;
-          height: 200px;
-          margin-bottom: 10px;
+          height: 265px;
+          margin-bottom: 6px;
         }
 
         img {
-          max-width: 100%;
-          max-height: 100%;
+          width: 100%;
+          height: 100%;
           object-fit: contain;
         }
 

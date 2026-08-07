@@ -42,6 +42,24 @@ const CUTTING_SCHEDULE_KEYS = [
 const isCuttingScheduleKey = (value) =>
   CUTTING_SCHEDULE_KEYS.some((schedule) => schedule.key === value);
 
+const isLouverSystem = (systemType) => String(systemType || "").trim() === "Louvers";
+
+const cuttingScheduleIdentity = (item = {}) => ({
+  systemType: String(item.systemType || "").trim(),
+  series: isLouverSystem(item.systemType) ? "" : String(item.series || "").trim(),
+  description: isLouverSystem(item.systemType) ? "" : String(item.description || "").trim(),
+});
+
+const cuttingScheduleMapKey = (item = {}) => {
+  const identity = cuttingScheduleIdentity(item);
+  return `${identity.systemType}||${identity.series}||${identity.description}`;
+};
+
+const cuttingScheduleFilter = (item = {}) => {
+  const identity = cuttingScheduleIdentity(item);
+  return isLouverSystem(identity.systemType) ? { systemType: identity.systemType } : identity;
+};
+
 const normalizeAngle = (value, fallback = "90") => {
   const text = String(value || "").replace(/[^\d]/g, "");
   return text === "45" || text === "90" ? text : fallback;
@@ -65,11 +83,13 @@ const getDescriptionCatalog = async (_req, res) => {
 
     const configs = await CuttingScheduleConfig.find({}).lean();
     const configMap = configs.reduce((acc, config) => {
-      acc[`${config.systemType}||${config.series}||${config.description}`] = config;
+      acc[cuttingScheduleMapKey(config)] = config;
       return acc;
     }, {});
 
-    const descriptions = series.flatMap((seriesItem) =>
+    const descriptions = series.filter((seriesItem) =>
+      !isLouverSystem(seriesItem.system?.name) && seriesItem.system?.name !== "Exhaust Fan"
+    ).flatMap((seriesItem) =>
       (seriesItem.descriptions || []).map((description) => {
         const systemType = seriesItem.system?.name || "";
         const key = `${systemType}||${seriesItem.name}||${description.name}`;
@@ -85,6 +105,17 @@ const getDescriptionCatalog = async (_req, res) => {
         };
       })
     );
+
+    const louverConfig = configMap[cuttingScheduleMapKey({ systemType: "Louvers" })];
+    const louverLineCount = getConfiguredLineCount(louverConfig);
+    descriptions.push({
+      systemType: "Louvers",
+      series: "",
+      description: "",
+      configId: louverConfig?._id,
+      lineCount: louverLineCount,
+      configured: louverLineCount > 0,
+    });
 
     res.json({ descriptions });
   } catch (error) {
@@ -212,10 +243,9 @@ const upsertConfig = async (req, res) => {
   try {
     const legacyLines = Array.isArray(req.body.lines) ? req.body.lines.map(normalizeLine) : [];
     const schedules = normalizeSchedules(req.body.schedules, legacyLines);
+    const identity = cuttingScheduleIdentity(req.body);
     const payload = {
-      systemType: String(req.body.systemType || "").trim(),
-      series: String(req.body.series || "").trim(),
-      description: String(req.body.description || "").trim(),
+      ...identity,
       notes: String(req.body.notes || "").trim(),
       lines: schedules.find((schedule) => schedule.key === "90_90")?.lines || [],
       schedules,
@@ -225,7 +255,7 @@ const upsertConfig = async (req, res) => {
         : "90_90",
     };
 
-    if (!payload.systemType || !payload.series || !payload.description) {
+    if (!payload.systemType || (!isLouverSystem(payload.systemType) && (!payload.series || !payload.description))) {
       return res.status(400).json({ message: "systemType, series and description are required" });
     }
 
@@ -276,11 +306,7 @@ const upsertConfig = async (req, res) => {
     }
 
     const config = await CuttingScheduleConfig.findOneAndUpdate(
-      {
-        systemType: payload.systemType,
-        series: payload.series,
-        description: payload.description,
-      },
+      cuttingScheduleFilter(identity),
       payload,
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
@@ -372,14 +398,11 @@ const uniqueConfigKeys = (items) =>
   Array.from(
     new Map(
       items.map((item) => {
-        const key = `${item.systemType || ""}||${item.series || ""}||${item.description || ""}`;
+        const identity = cuttingScheduleIdentity(item);
+        const key = cuttingScheduleMapKey(identity);
         return [
           key,
-          {
-            systemType: item.systemType || "",
-            series: item.series || "",
-            description: item.description || "",
-          },
+          cuttingScheduleFilter(identity),
         ];
       })
     ).values()
@@ -1066,7 +1089,7 @@ const buildBomData = async (quotation) => {
   ]);
 
   const configMap = configs.reduce((acc, config) => {
-    acc[`${config.systemType}||${config.series}||${config.description}`] = config;
+    acc[cuttingScheduleMapKey(config)] = config;
     return acc;
   }, {});
 
@@ -1094,7 +1117,7 @@ const buildBomData = async (quotation) => {
   const notes = [];
 
   for (const item of sourceItems) {
-    const key = `${item.systemType || ""}||${item.series || ""}||${item.description || ""}`;
+    const key = cuttingScheduleMapKey(item);
     const config = configMap[key];
     const schedule = config ? findScheduleLines(config, getItemScheduleKey(item, config)) : null;
     const hardwareLinkingConfig = hardwareLinkingConfigMap[key];
@@ -1387,7 +1410,7 @@ const buildScheduleData = async (quotation) => {
   ]);
 
   const configMap = configs.reduce((acc, config) => {
-    acc[`${config.systemType}||${config.series}||${config.description}`] = config;
+    acc[cuttingScheduleMapKey(config)] = config;
     return acc;
   }, {});
   const glassBeadingConfigMap = glassBeadingConfigs.reduce((acc, config) => {
@@ -1414,7 +1437,7 @@ const buildScheduleData = async (quotation) => {
 
   let sections = [];
   for (const item of sourceItems) {
-    const key = `${item.systemType || ""}||${item.series || ""}||${item.description || ""}`;
+    const key = cuttingScheduleMapKey(item);
     const config = configMap[key];
     const schedule = config ? findScheduleLines(config, getItemScheduleKey(item, config)) : null;
     const quantity = Math.max(1, toNumber(item.quantity, 1));
@@ -1969,7 +1992,7 @@ const buildBomPdfHtml = (data) => {
               </td>
               <td style="text-align: right;">
                 <div class="label">Contact</div>
-                <div class="muted">www.glazia.in<br/>+91-9958053708<br/>sales@glazia.com</div>
+                <div class="muted">www.glazia.in<br/>+91-9958053708<br/>sales@glazia.in</div>
               </td>
             </tr>
           </table>
@@ -2093,19 +2116,11 @@ const buildBomPdfHtml = (data) => {
               <tr>
                 <td style="width: 60%; vertical-align: top;">
                   <div class="muted"><span class="label">Account No: </span>50200084871361</div>
-                  <div class="muted"><span class="label">Account Name: </span>AGlazia Windoors Pvt. Ltd.</div>
+                  <div class="muted"><span class="label">Account Name: </span>Glazia Windoors Pvt. Ltd.</div>
                   <div class="muted"><span class="label">IFSC Code: </span>HDFC0004809</div>
                   <div class="muted"><span class="label">Bank: </span>HDFC Bank</div>
                 </td>
-                <td style="text-align: right; vertical-align: top;">
-                  <div style="display: inline-flex; gap: 12px; align-items: flex-start;">
-                    ${upiSrc ? `<img src="${upiSrc}" alt="Glazia UPI QR" class="qr-img" />` : ""}
-                    <div>
-                      <div class="muted"><span class="label">Name: </span>Glazia Windoors Pvt. Ltd.</div>
-                      <div class="muted"><span class="label">UPI: </span>glazia@okhdfcbank</div>
-                    </div>
-                  </div>
-                </td>
+                
               </tr>
             </table>
           </div>

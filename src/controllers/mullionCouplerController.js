@@ -35,7 +35,7 @@ const getSeriesCatalog = async (_req, res) => {
     );
 
     res.json({
-      series: series.map((item) => {
+      series: series.filter((item) => item.system?.name !== "Exhaust Fan").map((item) => {
         const systemType = item.system?.name || "";
         const config = bySeries.get(`${systemType}||${item.name}`);
         return {

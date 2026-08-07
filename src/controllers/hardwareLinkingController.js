@@ -10,7 +10,7 @@ const listCatalog = async (_req, res) => {
       HardwareLinkingConfig.find({}).lean(),
     ]);
     const byKey = new Map(configs.map((row) => [`${row.systemType}||${row.series}||${row.description}`, row]));
-    const descriptions = series.flatMap((seriesItem) => (seriesItem.descriptions || []).map((description) => {
+    const descriptions = series.filter((seriesItem) => seriesItem.system?.name !== "Exhaust Fan").flatMap((seriesItem) => (seriesItem.descriptions || []).map((description) => {
       const systemType = seriesItem.system?.name || "";
       const config = byKey.get(`${systemType}||${seriesItem.name}||${description.name}`);
       return { systemType, series: seriesItem.name, description: description.name, configured: Boolean(config), configId: config?._id };

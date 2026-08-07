@@ -34,6 +34,9 @@ const normalizeThreeRates = (input) => {
 // -------- System CRUD --------
 const createSystem = async (req, res) => {
   try {
+    if (String(req.body?.name || "").trim() === "Exhaust Fan") {
+      return res.status(400).json({ message: "Exhaust Fan is available only as an insert for Casement / Fix" });
+    }
     const system = await System.create(req.body);
     res.status(201).json(system);
   } catch (error) {
@@ -44,7 +47,7 @@ const createSystem = async (req, res) => {
 
 const listSystems = async (_req, res) => {
   try {
-    const systems = await System.find({}).sort({ name: 1 }).lean();
+    const systems = await System.find({ name: { $ne: "Exhaust Fan" } }).sort({ name: 1 }).lean();
     res.json({ systems });
   } catch (error) {
     console.error("listSystems error", error);
@@ -54,6 +57,9 @@ const listSystems = async (_req, res) => {
 
 const updateSystem = async (req, res) => {
   try {
+    if (String(req.body?.name || "").trim() === "Exhaust Fan") {
+      return res.status(400).json({ message: "Exhaust Fan is available only as an insert for Casement / Fix" });
+    }
     const system = await System.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
       runValidators: true,

@@ -17,6 +17,24 @@ const CUT_ALLOWANCE_MM = 10;
 
 const round2 = (value) => Math.round(toNumber(value) * 100) / 100;
 
+const isLouverItem = (item = {}) => String(item.systemType || "").trim() === "Louvers";
+
+const cuttingScheduleIdentity = (item = {}) => ({
+  systemType: String(item.systemType || "").trim(),
+  series: isLouverItem(item) ? "" : String(item.series || "").trim(),
+  description: isLouverItem(item) ? "" : String(item.description || "").trim(),
+});
+
+const cuttingScheduleMapKey = (item = {}) => {
+  const identity = cuttingScheduleIdentity(item);
+  return `${identity.systemType}||${identity.series}||${identity.description}`;
+};
+
+const cuttingScheduleFilter = (item = {}) => {
+  const identity = cuttingScheduleIdentity(item);
+  return isLouverItem(identity) ? { systemType: identity.systemType } : identity;
+};
+
 const getJoinPricingLines = (lines, orientation) => {
   const configuredLines = Array.isArray(lines) ? lines : [];
   const dimensionVariable = orientation === "vertical"
@@ -298,11 +316,17 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
 
   const regularItems = sourceItems.filter((item) => item.itemType !== "join");
   const joinItems = sourceItems.filter((item) => item.itemType === "join");
-  const configFilters = regularItems.map((item) => ({
-    systemType: String(item.systemType || ""),
-    series: String(item.series || ""),
-    description: String(item.description || ""),
-  }));
+  regularItems.forEach((item) => {
+    const identity = cuttingScheduleIdentity(item);
+    if (!identity.systemType) throw new Error("systemType is required");
+    if (identity.systemType === "Exhaust Fan") {
+      throw new Error("Exhaust Fan is available only as an insert for Casement / Fix");
+    }
+    if (!isLouverItem(item) && (!identity.series || !identity.description)) {
+      throw new Error("systemType, series and description are required");
+    }
+  });
+  const configFilters = regularItems.map(cuttingScheduleFilter);
   const [configs, glassBeadingConfigs, hardwareLinkingConfigs, mullionConfigs, products, hardware, profileOptions, user, nalcoPrice] = await Promise.all([
     CuttingScheduleConfig.find({ $or: configFilters }).lean(),
     GlassBeadingConfig.find({ $or: configFilters }).lean(),
@@ -321,7 +345,7 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
   if (nalcoPrice <= 0) throw new Error("Latest NALCO price is unavailable");
 
   const configMap = new Map(configs.map((config) => [
-    `${config.systemType}||${config.series}||${config.description}`,
+    cuttingScheduleMapKey(config),
     config,
   ]));
   const productsByCode = new Map(products.map((product) => [
@@ -362,11 +386,12 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
         calculationVersion: 2,
       };
     }
-    const config = configMap.get(`${item.systemType}||${item.series}||${item.description}`);
-    if (!config) throw new Error(`Cutting schedule is not configured for ${item.description}`);
+    const config = configMap.get(cuttingScheduleMapKey(item));
+    const itemLabel = isLouverItem(item) ? item.systemType : item.description;
+    if (!config) throw new Error(`Cutting schedule is not configured for ${itemLabel}`);
     const key = scheduleKeyForItem(item);
     const schedule = findSchedule(config, key);
-    if (!schedule) throw new Error(`Cutting schedule variant ${key} is not configured for ${item.description}`);
+    if (!schedule) throw new Error(`Cutting schedule variant ${key} is not configured for ${itemLabel}`);
     return {
       clientId: String(item.clientId || item.id || ""),
       ...calculateProfileMaterialBaseRate({
@@ -394,6 +419,8 @@ module.exports = {
   __test: {
     calculateProfileMaterialBaseRate,
     calculateJoinMaterialRate,
+    cuttingScheduleIdentity,
+    cuttingScheduleMapKey,
     getJoinPricingLines,
     resolveProfileAdjustment,
     scheduleKeyForItem,

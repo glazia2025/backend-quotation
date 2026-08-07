@@ -38,8 +38,8 @@ const cuttingScheduleVariantSchema = new mongoose.Schema(
 const cuttingScheduleConfigSchema = new mongoose.Schema(
   {
     systemType: { type: String, required: true, trim: true },
-    series: { type: String, required: true, trim: true },
-    description: { type: String, required: true, trim: true },
+    series: { type: String, trim: true, default: "" },
+    description: { type: String, trim: true, default: "" },
     lines: [cuttingScheduleLineSchema],
     glassBeadingLinks: [
       {
