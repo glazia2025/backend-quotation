@@ -1222,31 +1222,6 @@ function renderItemPage(data, item,showIntro = false) {
   return `
     <section class="page">
     ${showIntro ? `
-      <div class="page-header">
-        <div class="page-brand">
-          ${data.globalConfig.logo
-      ? `<img src="${data.globalConfig.logo}" class="header-logo" alt="Logo" />`
-      : `<div class="header-company">${escapeHtml(
-        data.customerDetails.name || "Customer"
-      )}</div>`
-    }
-        </div>
-
-        <div class="page-meta">
-          <div><strong>Quote No:</strong> ${escapeHtml(
-      data.generatedId || data.quotationDetails.id || "-"
-    )}</div>
-          <div><strong>Project:</strong> ${escapeHtml(
-      data.quotationDetails.opportunity || "Enquiry"
-    )}</div>
-          <div><strong>Date:</strong> ${escapeHtml(
-      data.quotationDetails.displayDate || "-"
-    )}</div>
-        </div>
-      </div>
-
-      <div class="separator"></div>
-
       <h2 class="page-title">Window Design, Specification and Value</h2>
       <div class="customer-line">Customer: ${escapeHtml(
       data.customerDetails.name || "-"
@@ -1305,31 +1280,6 @@ function renderSummaryPage(data) {
 
   return `
     <section class="page">
-      <div class="page-header">
-        <div class="page-brand">
-          ${data.globalConfig.logo
-      ? `<img src="${data.globalConfig.logo}" class="header-logo" alt="Logo" />`
-      : `<div class="header-company">${escapeHtml(
-        data.customerDetails.name || "Customer"
-      )}</div>`
-    }
-        </div>
-
-        <div class="page-meta">
-          <div><strong>Quote No:</strong> ${escapeHtml(
-      data.quotationDetails.id || data.generatedId || "-"
-    )}</div>
-          <div><strong>Project:</strong> ${escapeHtml(
-      data.quotationDetails.opportunity || "Enquiry"
-    )}</div>
-          <div><strong>Date:</strong> ${escapeHtml(
-      data.quotationDetails.displayDate || "-"
-    )}</div>
-        </div>
-      </div>
-
-      <div class="separator"></div>
-
       <h2 class="page-title">Quotation Summary</h2>
 
       <table class="summary-table">
@@ -1493,34 +1443,6 @@ const pages = [
        ${
       index === 0
         ? `
-          <div class="page-header">
-            <div class="page-brand">
-              ${
-                data.globalConfig.logo
-                  ? `<img src="${data.globalConfig.logo}" class="header-logo" alt="Logo" />`
-                  : `<div class="header-company">${escapeHtml(
-                      data.customerDetails.name || "Customer"
-                    )}</div>`
-              }
-            </div>
-
-            <div class="page-meta">
-              <div><strong>Quote No:</strong> ${escapeHtml(
-                data.generatedId || data.quotationDetails.id || "-"
-              )}</div>
-
-              <div><strong>Project:</strong> ${escapeHtml(
-                data.quotationDetails.opportunity || "Enquiry"
-              )}</div>
-
-              <div><strong>Date:</strong> ${escapeHtml(
-                data.quotationDetails.displayDate || "-"
-              )}</div>
-            </div>
-          </div>
-
-          <div class="separator"></div>
-
           <h2 class="page-title">Window Design, Specification and Value</h2>
 
           <div class="customer-line">
