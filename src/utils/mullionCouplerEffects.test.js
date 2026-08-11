@@ -13,6 +13,7 @@ const {
     getJoinLinesForOrientation,
     getScheduledLineQuantity,
     itemRowsForSchedule,
+    parseGlassDimensions,
     consumeProfileLength,
   },
 } = require("../controllers/cuttingScheduleController");
@@ -23,6 +24,12 @@ const {
     resolveJoinEndpoint,
   },
 } = require("./quotationItems");
+
+test("glass report parses evaluated width and height dimensions", () => {
+  assert.deepEqual(parseGlassDimensions("1271 x 2687"), { widthMm: 1271, heightMm: 2687 });
+  assert.deepEqual(parseGlassDimensions("683 × 2530"), { widthMm: 683, heightMm: 2530 });
+  assert.deepEqual(parseGlassDimensions(""), { widthMm: 0, heightMm: 0 });
+});
 
 test("cutting schedule multiplies each configured line quantity by item quantity", () => {
   assert.equal(

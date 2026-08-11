@@ -1394,7 +1394,7 @@ function renderSummaryPage(data) {
 }
 
 function renderTermsPage(data) {
-  const terms = data.quotationDetails.terms || data.globalConfig.terms || "";
+  const terms = data.globalConfig.terms || data.quotationDetails.terms || "";
   const prerequisites = data.globalConfig.prerequisites || "";
 
   if (!prerequisites && !terms) return "";
@@ -1494,6 +1494,7 @@ const pages = [
   }),
 
   renderSummaryPage(data),
+  renderTermsPage(data),
 ].join("");
 
 

@@ -10,6 +10,10 @@ const quotationConfigSchema = new mongoose.Schema({
         transport: { type: Number, default: 0 },
         loadingUnloading: { type: Number, default: 0 },
         discountPercent: { type: Number, default: 0 },
+        showInstallation: { type: Boolean, default: true },
+        showTransport: { type: Boolean, default: true },
+        showLoadingUnloading: { type: Boolean, default: true },
+        showDiscount: { type: Boolean, default: true },
     },
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User" }
 });

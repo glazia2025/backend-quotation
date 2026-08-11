@@ -37,6 +37,7 @@ const quotationSchema = new mongoose.Schema(
       profitPercentage: { type: Number, default: 0 },
     },
     globalConfig: {
+      isOverridden: { type: Boolean, default: false },
       logo: { type: String },
       website: { type: String },
       terms: { type: String },

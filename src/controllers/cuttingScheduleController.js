@@ -1704,6 +1704,131 @@ const buildScheduleData = async (quotation) => {
   };
 };
 
+const parseGlassDimensions = (dimension) => {
+  const match = String(dimension || "").match(/(-?\d+(?:\.\d+)?)\s*[x×]\s*(-?\d+(?:\.\d+)?)/i);
+  if (!match) return { widthMm: 0, heightMm: 0 };
+  return {
+    widthMm: Math.max(0, toNumber(match[1])),
+    heightMm: Math.max(0, toNumber(match[2])),
+  };
+};
+
+const buildGlassReportData = async (quotation) => {
+  const scheduleData = await buildScheduleData(quotation);
+  const embeddedUserName = String(quotation.user?.name || "").trim();
+  const userId = quotation.user?._id || quotation.user;
+  const user = !embeddedUserName && mongoose.Types.ObjectId.isValid(userId)
+    ? await User.findById(userId).select("name").lean()
+    : null;
+  const userName = embeddedUserName || String(user?.name || "").trim() || "-";
+  const customerName = String(quotation.customerDetails?.name || "").trim() || "-";
+  let serialNumber = 0;
+  const groups = new Map();
+
+  scheduleData.sections.forEach((section) => {
+    const item = section.item || {};
+    (section.rows || []).filter((row) => row.itemType === "glass").forEach((row) => {
+      const glassType = String(row.description || item.glassSpec || "Unspecified Glass").trim();
+      const { widthMm, heightMm } = parseGlassDimensions(row.dimension);
+      const quantity = Math.max(0, toNumber(row.quantity));
+      const rawAreaSqmt = (widthMm * heightMm * quantity) / 1000000;
+      const areaSqmt = round3(rawAreaSqmt);
+      const areaSqft = round3(rawAreaSqmt * 10.7639104167);
+      const reportRow = {
+        serialNumber: ++serialNumber,
+        designRef: String(item.parentRefCode || item.refCode || ""),
+        location: String(item.location || item.projectLocation || ""),
+        position: String(row.glassRef || row.position || "")
+          .replace(/\s*-\s*Glass size$/i, "")
+          .replace(/^G(?=\d+$)/i, ""),
+        widthMm: round3(widthMm),
+        heightMm: round3(heightMm),
+        quantity: round3(quantity),
+        areaSqmt,
+        areaSqft,
+      };
+      if (!groups.has(glassType)) groups.set(glassType, []);
+      groups.get(glassType).push(reportRow);
+    });
+  });
+
+  const glassGroups = Array.from(groups.entries()).map(([glassType, rows]) => ({
+    glassType,
+    rows,
+    areaSqmt: round3(rows.reduce((sum, row) => sum + row.areaSqmt, 0)),
+    areaSqft: round3(rows.reduce((sum, row) => sum + row.areaSqft, 0)),
+  }));
+  return {
+    ...scheduleData,
+    userName,
+    customerName,
+    glassGroups,
+    totalAreaSqmt: round3(glassGroups.reduce((sum, group) => sum + group.areaSqmt, 0)),
+    totalAreaSqft: round3(glassGroups.reduce((sum, group) => sum + group.areaSqft, 0)),
+  };
+};
+
+const buildGlassReportPdfHtml = (data) => {
+  const number = (value, digits = 3) => Number(value || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+  const groupRows = data.glassGroups.length
+    ? data.glassGroups.map((group) => `
+      <tr class="glass-heading"><td colspan="9">${escapeHtml(group.glassType)}</td></tr>
+      ${group.rows.map((row) => `
+        <tr>
+          <td>${row.serialNumber}</td>
+          <td>${escapeHtml(row.designRef)}</td>
+          <td class="text">${escapeHtml(row.location)}</td>
+          <td>${escapeHtml(row.position)}</td>
+          <td>${number(row.widthMm, 0)}</td>
+          <td>${number(row.heightMm, 0)}</td>
+          <td>${number(row.quantity, 0)}</td>
+          <td>${number(row.areaSqmt)}</td>
+          <td>${number(row.areaSqft)}</td>
+        </tr>`).join("")}
+      <tr class="subtotal">
+        <td colspan="6">Sub-Total</td><td>${number(group.rows.reduce((sum, row) => sum + row.quantity, 0), 0)}</td>
+        <td>${number(group.areaSqmt)}</td><td>${number(group.areaSqft)}</td>
+      </tr>`).join("")
+    : '<tr><td colspan="9" class="empty">No configured glass cutting lines were found for this quotation.</td></tr>';
+
+  return `<!doctype html>
+  <html><head><meta charset="utf-8"/><style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111827; font-family: Arial, sans-serif; font-size: 10px; }
+    header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; border-bottom: 2px solid #124657; padding-bottom: 8px; }
+    h1 { margin: 0; color: #124657; font-size: 22px; }
+    .meta { text-align: right; line-height: 1.5; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #9ca3af; padding: 6px 5px; text-align: center; vertical-align: middle; }
+    th { background: #124657; color: white; font-size: 9px; }
+    th:nth-child(1) { width: 6%; } th:nth-child(2) { width: 12%; } th:nth-child(3) { width: 20%; }
+    th:nth-child(4) { width: 9%; } th:nth-child(5), th:nth-child(6) { width: 10%; }
+    th:nth-child(7) { width: 7%; } th:nth-child(8), th:nth-child(9) { width: 13%; }
+    td.text { text-align: left; }
+    .glass-heading td { background: #dbeef2; color: #0f3f4c; font-size: 12px; font-weight: 700; text-align: left; padding: 7px; }
+    .subtotal td { background: #f3f4f6; font-weight: 700; }
+    .subtotal td:first-child { text-align: right; }
+    .grand-total td { background: #124657; color: white; font-size: 11px; font-weight: 700; }
+    .grand-total td:first-child { text-align: right; }
+    .empty { padding: 30px; color: #6b7280; }
+    tr { break-inside: avoid; }
+    footer { margin-top: 8px; color: #6b7280; font-size: 9px; text-align: right; }
+  </style></head><body>
+    <header><div><h1>Glass Report</h1><div><b>User:</b> ${escapeHtml(data.userName)}<br/><b>Customer:</b> ${escapeHtml(data.customerName)}</div></div>
+      <div class="meta"><b>Quotation:</b> ${escapeHtml(data.projectCode)}<br/><b>Generated:</b> ${data.generatedAt.toLocaleString("en-IN")}</div></header>
+    <table><thead><tr>
+      <th>Serial No.</th><th>Design Ref</th><th>Location</th><th>Position</th>
+      <th>Width (mm)</th><th>Height (mm)</th><th>Quantity</th><th>Area (sqmt)</th><th>Area (sqft)</th>
+    </tr></thead><tbody>${groupRows}
+      <tr class="grand-total"><td colspan="7">Grand Total Area</td><td>${number(data.totalAreaSqmt)}</td><td>${number(data.totalAreaSqft)}</td></tr>
+    </tbody></table><footer>Generated by Glazia</footer>
+  </body></html>`;
+};
+
 const renderRows = (rows) =>
   rows.length
     ? rows
@@ -2262,6 +2387,53 @@ const renderBomPdfBuffer = async (quotation) => {
   }
 };
 
+const renderGlassReportPdfBuffer = async (quotation) => {
+  let browserHandle;
+  let page;
+  try {
+    const data = await buildGlassReportData(quotation);
+    const html = buildGlassReportPdfHtml(data);
+    browserHandle = await launchPdfBrowser();
+    page = await browserHandle.browser.newPage();
+    await setPdfContent(page, html);
+    return await page.pdf({
+      format: "A4",
+      landscape: true,
+      printBackground: true,
+      margin: { top: "10mm", right: "10mm", bottom: "10mm", left: "10mm" },
+      preferCSSPageSize: true,
+    });
+  } finally {
+    if (page && !page.isClosed()) await page.close();
+    await closePdfBrowser(browserHandle);
+  }
+};
+
+const generateGlassReportPdf = async (req, res) => {
+  try {
+    const quotation = await findQuotationForUser(req, res, false);
+    if (!quotation) return null;
+    const { buffer: pdfBuffer, cacheStatus } = await getOrGeneratePdf({
+      quotation,
+      type: "glass-report",
+      generate: async () => renderGlassReportPdfBuffer(await hydrateQuotationItems(quotation)),
+    });
+    const projectCode = quotation.generatedId || quotation.quotationDetails?.id || String(quotation._id);
+    const fileName = `${projectCode || "quotation"}-glass-report.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("X-PDF-Cache", cacheStatus);
+    return res.end(pdfBuffer);
+  } catch (error) {
+    console.error("generateGlassReportPdf error", error);
+    if (error.code === "ENOSPC") {
+      return res.status(507).json({ message: "Server does not have enough free disk space to generate Glass Report PDF", error: error.message });
+    }
+    return res.status(500).json({ message: "Failed to generate Glass Report PDF", error: error.message });
+  }
+};
+
 const generateBomPdf = async (req, res) => {
   try {
     const quotation = await findQuotationForUser(req, res, false);
@@ -2349,14 +2521,17 @@ module.exports = {
     getJoinLinesForOrientation,
     getScheduledLineQuantity,
     consumeProfileLength,
+    parseGlassDimensions,
   },
   deleteConfig,
   getBeadingCatalog,
   getBomData,
   getOptimizedFinal,
   generateBomPdf,
+  generateGlassReportPdf,
   generateCuttingSchedulePdf,
   renderBomPdfBuffer,
+  renderGlassReportPdfBuffer,
   renderCuttingSchedulePdfBuffer,
   getConfig,
   getDescriptionCatalog,

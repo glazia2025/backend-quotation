@@ -21,6 +21,7 @@ const {
   getBomData,
   getOptimizedFinal,
   generateBomPdf,
+  generateGlassReportPdf,
   generateCuttingSchedulePdf,
 } = require("../controllers/cuttingScheduleController");
 const {
@@ -73,6 +74,7 @@ router.delete("/:id", isUser, deleteQuotationById);
 router.get("/:id/pdf", isUser, generateQuotationPdfController);
 router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
 router.get("/:id/bom", isUser, generateBomPdf);
+router.get("/:id/glass-report", isUser, generateGlassReportPdf);
 router.get("/:id/bom-data", isUser, getBomData);
 router.get("/:id/optimized-final", isUser, getOptimizedFinal);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
