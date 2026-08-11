@@ -31,6 +31,7 @@ const {
   inlineQuotationImages,
   uploadQuotationImages,
 } = require("../utils/quotationImages");
+const ExcelJS = require("exceljs");
 
 const numberOr = (value, fallback = 0) => {
   const asNumber = Number(value);
@@ -371,7 +372,8 @@ const createQuotation = async (req, res) => {
 
     const { topLevelIds } = await createQuotationItems(
       quotation._id,
-      prepared.items
+      prepared.items,
+      req.user?.userId
     );
     quotation.quotationItems = topLevelIds;
     await quotation.save();
@@ -521,7 +523,8 @@ const updateQuotationById = async (req, res) => {
     });
     const { topLevelIds, allIds } = await createQuotationItems(
       quotation._id,
-      prepared.items
+      prepared.items,
+      req.user?.userId
     ).catch(async (error) => {
       await deleteS3Keys(prepared.uploadedKeys).catch(() => { });
       throw error;
@@ -1218,34 +1221,10 @@ function renderSubItemsTable(subItems) {
   `;
 }
 
-function renderItemPage(data, item) {
+function renderItemPage(data, item,showIntro = false) {
   return `
     <section class="page">
-      <div class="page-header">
-        <div class="page-brand">
-          ${data.globalConfig.logo
-      ? `<img src="${data.globalConfig.logo}" class="header-logo" alt="Logo" />`
-      : `<div class="header-company">${escapeHtml(
-        data.customerDetails.name || "Customer"
-      )}</div>`
-    }
-        </div>
-
-        <div class="page-meta">
-          <div><strong>Quote No:</strong> ${escapeHtml(
-      data.generatedId || data.quotationDetails.id || "-"
-    )}</div>
-          <div><strong>Project:</strong> ${escapeHtml(
-      data.quotationDetails.opportunity || "Enquiry"
-    )}</div>
-          <div><strong>Date:</strong> ${escapeHtml(
-      data.quotationDetails.displayDate || "-"
-    )}</div>
-        </div>
-      </div>
-
-      <div class="separator"></div>
-
+    ${showIntro ? `
       <h2 class="page-title">Window Design, Specification and Value</h2>
       <div class="customer-line">Customer: ${escapeHtml(
       data.customerDetails.name || "-"
@@ -1253,6 +1232,7 @@ function renderItemPage(data, item) {
       <div class="page-note">
         Below is the proposed specification and commercial value for the selected windows and doors.
       </div>
+      ` : ""}
 
       ${renderMainItemCard(item)}
       ${item.isCombination ? renderSubItemsTable(item.subItems) : ""}
@@ -1303,31 +1283,6 @@ function renderSummaryPage(data) {
 
   return `
     <section class="page">
-      <div class="page-header">
-        <div class="page-brand">
-          ${data.globalConfig.logo
-      ? `<img src="${data.globalConfig.logo}" class="header-logo" alt="Logo" />`
-      : `<div class="header-company">${escapeHtml(
-        data.customerDetails.name || "Customer"
-      )}</div>`
-    }
-        </div>
-
-        <div class="page-meta">
-          <div><strong>Quote No:</strong> ${escapeHtml(
-      data.quotationDetails.id || data.generatedId || "-"
-    )}</div>
-          <div><strong>Project:</strong> ${escapeHtml(
-      data.quotationDetails.opportunity || "Enquiry"
-    )}</div>
-          <div><strong>Date:</strong> ${escapeHtml(
-      data.quotationDetails.displayDate || "-"
-    )}</div>
-        </div>
-      </div>
-
-      <div class="separator"></div>
-
       <h2 class="page-title">Quotation Summary</h2>
 
       <table class="summary-table">
@@ -1482,12 +1437,27 @@ function buildPdfHtml(data, user) {
 
 const pages = [
   renderCoverPage(data, user),
-  ...groupedPages.map((group) => {
+  ...groupedPages.map((group,index) => {
     if (group.length === 1 && group[0].isCombination) {
-    return renderItemPage(data, group[0]);
+    return renderItemPage(data, group[0],index === 0);
   }
     return `
       <section class="page">
+       ${
+      index === 0
+        ? `
+          <h2 class="page-title">Window Design, Specification and Value</h2>
+
+          <div class="customer-line">
+            Customer: ${escapeHtml(data.customerDetails.name || "-")}
+          </div>
+
+          <div class="page-note">
+            Below is the proposed specification and commercial value for the selected windows and doors.
+          </div>
+        `
+        : ""
+    }
         ${group.map((item) => renderMainItemCard(item)).join("")}
       </section>
     `;
@@ -2171,7 +2141,150 @@ const generateQuotationPdfController = async (req, res) => {
   }
 };
 
+//For Excel
+const exportQuotationExcel = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const includeAmount = req.query.includeAmount === "true";
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid quotation id" });
+    }
+
+    let quotation = await Quotation.findById(id).lean();
+
+    if (!quotation) {
+      return res.status(404).json({ message: "Quotation not found" });
+    }
+
+    if (
+      req.user?.role !== "admin" &&
+      quotation.user &&
+      req.user?.userId &&
+      quotation.user.toString() !== req.user.userId
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    quotation = await hydrateQuotationItems(quotation);
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Quotation Items");
+
+    worksheet.columns = [
+      { header: "Ref Code", key: "refCode", width: 15 },
+      { header: "Location", key: "location", width: 20 },
+      { header: "Width (mm)", key: "width", width: 15 },
+      { header: "Height (mm)", key: "height", width: 15 },
+      { header: "Quantity", key: "quantity", width: 12 },
+      { header: "Area", key: "area", width: 12 },
+      { header: "System", key: "systemType", width: 18 },
+      { header: "Series", key: "series", width: 18 },
+      { header: "Description", key: "description", width: 25 },
+      { header: "Color Finish", key: "colorFinish", width: 18 },
+      { header: "Glass Spec", key: "glassSpec", width: 25 },
+      { header: "Handle Type", key: "handleType", width: 18 },
+      { header: "Handle Color", key: "handleColor", width: 18 },
+      { header: "Mesh Present", key: "meshPresent", width: 15 },
+      { header: "Mesh Type", key: "meshType", width: 18 },
+      { header: "Rate", key: "rate", width: 12 },
+      ...(includeAmount
+         ? [{ header: "Amount", key: "amount", width: 15 }]
+         : []),
+    ];
+
+    worksheet.getRow(1).font = { bold: true };
+   quotation.items.forEach((item) => {
+  const parentRow =
+  worksheet.addRow({
+    refCode: item.refCode,
+    location: item.location || "",
+    width: item.systemType === "Combination" ? "" : item.width,
+    height: item.systemType === "Combination" ? "" : item.height,
+    quantity: item.systemType === "Combination" ? "" : item.quantity,
+    area: item.systemType === "Combination" ? "" : item.area,
+    systemType: item.systemType,
+    series: item.systemType === "Combination" ? "" : item.series,
+    description: item.systemType === "Combination" ? "" : item.description,
+    colorFinish: item.systemType === "Combination" ? "" : item.colorFinish,
+    glassSpec: item.systemType === "Combination" ? "" : item.glassSpec,
+    handleType: item.systemType === "Combination" ? "" : item.handleType,
+    handleColor: item.systemType === "Combination" ? "" : item.handleColor,
+    meshPresent:
+      item.systemType === "Combination"
+        ? ""
+        : item.meshPresent
+        ? "Yes"
+        : "No",
+    meshType: item.systemType === "Combination" ? "" : item.meshType,
+    rate: item.systemType === "Combination" ? "" : item.rate,
+    ...(includeAmount && {
+  amount: item.systemType === "Combination" ? "" : item.amount,
+}),
+    remarks: item.systemType === "Combination" ? "" : item.remarks,
+  });
+   if (item.systemType === "Combination") {
+    parentRow.font = { bold: true };
+  }
+  if (
+    item.systemType === "Combination" &&
+    Array.isArray(item.subItems) &&
+    item.subItems.length > 0
+  ) {
+    item.subItems.forEach((sub) => {
+      const childRow =
+      worksheet.addRow({
+        refCode: `↳ ${sub.refCode}`,
+        location: sub.location || "",
+        width: sub.width,
+        height: sub.height,
+        quantity: sub.quantity,
+        area: sub.area,
+        systemType: sub.systemType,
+        series: sub.series,
+        description: sub.description,
+        colorFinish: sub.colorFinish,
+        glassSpec: sub.glassSpec,
+        handleType: sub.handleType,
+        handleColor: sub.handleColor,
+        meshPresent: sub.meshPresent ? "Yes" : "No",
+        meshType: sub.meshType,
+        rate: sub.rate,
+        ...(includeAmount && {
+  amount: sub.amount,
+}),
+      });
+childRow.fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFF2F2F2" }, 
+};
+    });
+  }
+});
+    const fileName = `Quotation-${quotation.generatedId || quotation._id}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Export Excel Error:", error);
+    res.status(500).json({
+      message: "Failed to export quotation.",
+    });
+  }
+};
+
 // for elevation 
+
 const generateElevationPdfController = async (req, res) => {
   let browserHandle;
   let page;
@@ -2236,4 +2349,5 @@ module.exports = {
   generateQuotationPdfController,
   renderQuotationPdfBuffer,
   generateElevationPdfController,
+  exportQuotationExcel,
 };

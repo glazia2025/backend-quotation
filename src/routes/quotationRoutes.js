@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 const isUser = require("../middleware/userMiddleware");
 const BaseRate = require("../models/Quotation/BaseRate");
+const multer = require("multer");
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
 
 const {
   getSystems,
@@ -15,7 +19,9 @@ const {
   updateQuotationById,
   deleteQuotationById,
   generateQuotationPdfController,
-   generateElevationPdfController
+   generateElevationPdfController,
+   exportQuotationExcel,
+   importQuotationExcel
 } = require("../controllers/quotationController");
 const {
   getBomData,
@@ -73,6 +79,7 @@ router.post("/:id", isUser, updateQuotationById);
 router.delete("/:id", isUser, deleteQuotationById);
 router.get("/:id/pdf", isUser, generateQuotationPdfController);
 router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
+router.get("/:id/export-excel", isUser, exportQuotationExcel);
 router.get("/:id/bom", isUser, generateBomPdf);
 router.get("/:id/glass-report", isUser, generateGlassReportPdf);
 router.get("/:id/bom-data", isUser, getBomData);
