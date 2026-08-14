@@ -1829,17 +1829,20 @@ const buildGlassReportPdfHtml = (data) => {
   </body></html>`;
 };
 
-const renderRows = (rows) =>
-  rows.length
-    ? rows
+const renderRows = (rows) =>{
+ const visibleRows = rows.filter((row) => row.itemType !== "glass");
+  // rows.length
+  //   ? rows
+  return visibleRows.length
+  ? visibleRows
       .map(
         (row) => `
         <tr>
           <td>${escapeHtml(
           row.itemType === "profile"
             ? "Profile"
-            : row.itemType === "glass"
-              ? "Glass"
+            // : row.itemType === "glass"
+            //   ? "Glass"
               : row.itemType === "beading"
                 ? "Beading"
                 : row.itemType === "gasket"
@@ -1851,7 +1854,7 @@ const renderRows = (rows) =>
                   : "Fabrication Hardware"
         )}</td>
           <td>${escapeHtml(row.description)}</td>
-           <td>${escapeHtml(row.itemType === "glass" ? "--" : row.sapCode)}</td> 
+           <td>${escapeHtml(row.sapCode)}</td> 
           <td class="num">${row.dimension === "" ? "" : escapeHtml(row.dimension)}</td>
           <td class="num">${escapeHtml(row.cutAngle)}</td>
           <td class="num">${escapeHtml(row.quantity)}</td>
@@ -1861,7 +1864,7 @@ const renderRows = (rows) =>
       `
       )
       .join("")
-    : '<tr><td colspan="8" class="empty">No cutting schedule items to show.</td></tr>';
+    : '<tr><td colspan="8" class="empty">No cutting schedule items to show.</td></tr>'};
 
 const renderNotes = (notes = []) =>
   notes.length
