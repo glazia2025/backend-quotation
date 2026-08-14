@@ -108,6 +108,45 @@ const getNextQuotationId = async (userId) => {
   return `${prefix}${nextSuffix}`;
 };
 
+
+// const getNextQuotationId = async (userId) => {
+//   let name = "";
+
+//   if (userId) {
+//     const user = await User.findById(userId).select("name").lean();
+//     name = user?.name || "";
+//   }
+
+//   const prefix = buildQuotationPrefix(name);
+
+//   console.log("prefix", prefix);
+
+//   const quotations = await Quotation.find({
+//     generatedId: new RegExp(`^${prefix}\\d+$`),
+//   })
+//     .select({ generatedId: 1 })
+//     .lean();
+
+//   let maxNumber = 0;
+
+//   for (const quotation of quotations) {
+//     const generatedId = quotation.generatedId || "";
+//     const suffix = Number(generatedId.slice(prefix.length));
+
+//     if (Number.isFinite(suffix) && suffix > maxNumber) {
+//       maxNumber = suffix;
+//     }
+//   }
+
+//   const nextValue = maxNumber + 1;
+//   const nextSuffix = String(nextValue).padStart(3, "0");
+
+//   const nextQuotationId = `${prefix}${nextSuffix}`;
+
+//   console.log("next quotation id", nextQuotationId);
+
+//   return nextQuotationId;
+// };
 const fetchOptionValues = async (type, systemDoc) => {
   if (type === "colorFinish" || type === "meshType" || type === "glassSpec") {
     const globalOption = await OptionSet.findOne({ type, system: { $exists: false } }).lean();
@@ -611,6 +650,92 @@ const deleteQuotationById = async (req, res) => {
   }
 };
 
+const duplicateQuotationById = async (req, res) => {
+  let newQuotation = null;
+  let uploadedKeys = [];
+
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid quotation id" });
+    }
+    const originalQuotation = await Quotation.findById(id).lean();
+
+    if (!originalQuotation) {
+      return res.status(404).json({ message: "Quotation not found" });
+    }
+    if (
+      req.user?.role !== "admin" &&
+      originalQuotation.user &&
+      req.user?.userId &&
+      originalQuotation.user.toString() !== req.user.userId
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const hydratedQuotation = await hydrateQuotationItems(originalQuotation);
+    const generatedId = await getNextQuotationId(req.user?.userId);
+    const newQuotationId = new mongoose.Types.ObjectId();
+    const prepared = await uploadQuotationImages({
+      quotationId: newQuotationId,
+      items: hydratedQuotation.items || [],
+      globalConfig: hydratedQuotation.globalConfig || {},
+    });
+
+    uploadedKeys = prepared.uploadedKeys;
+
+    newQuotation = await Quotation.create({
+      _id: newQuotationId,
+      user: req.user?.userId,
+      customerDetails: hydratedQuotation.customerDetails || {},
+      quotationDetails: {
+        ...(hydratedQuotation.quotationDetails || {}),
+      },
+      breakdown: hydratedQuotation.breakdown || {},
+      globalConfig: prepared.globalConfig,
+      generatedId,
+    });
+
+    const { topLevelIds } = await createQuotationItems(
+      newQuotation._id,
+      prepared.items || [],
+      req.user?.userId
+    );
+
+    newQuotation.quotationItems = topLevelIds;
+    await newQuotation.save();
+
+    const duplicatedQuotation = await hydrateQuotationItems(
+      newQuotation.toObject()
+    );
+
+    scheduleQuotationPdfWarmup(
+      newQuotation._id,
+      req.user?.userId
+    );
+
+    return res.status(201).json({
+      message: "Quotation duplicated successfully",
+      quotation: duplicatedQuotation,
+    });
+  } catch (error) {
+    if (newQuotation?._id) {
+      await Promise.allSettled([
+        deleteQuotationItems(newQuotation._id),
+        Quotation.findByIdAndDelete(newQuotation._id),
+      ]);
+    }
+    if (uploadedKeys.length) {
+      await deleteS3Keys(uploadedKeys).catch(() => { });
+    }
+
+    console.error("Duplicate quotation error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Error duplicating quotation",
+    });
+  }
+};
 const COMBINATION_SYSTEM = "Combination";
 
 function toNumber(value, fallback = 0) {
@@ -995,8 +1120,7 @@ function renderCoverPage(data, user) {
        <div>
   ${logoHtml}
 
-  ${
-    website
+  ${website
       ? `
       <div class="company-website">
         <a href="${website.startsWith("http") ? website : `https://${website}`}" target="_blank">
@@ -1005,7 +1129,7 @@ function renderCoverPage(data, user) {
       </div>
       `
       : ""
-  }
+    }
 </div>
         <div class="company-block">
           <div class="company-name">${companyName}</div>
@@ -1221,14 +1345,14 @@ function renderSubItemsTable(subItems) {
   `;
 }
 
-function renderItemPage(data, item,showIntro = false) {
+function renderItemPage(data, item, showIntro = false) {
   return `
     <section class="page">
     ${showIntro ? `
       <h2 class="page-title">Window Design, Specification and Value</h2>
       <div class="customer-line">Customer: ${escapeHtml(
-      data.customerDetails.name || "-"
-    )}</div>
+    data.customerDetails.name || "-"
+  )}</div>
       <div class="page-note">
         Below is the proposed specification and commercial value for the selected windows and doors.
       </div>
@@ -1435,17 +1559,16 @@ function groupItemsForPDF(items) {
 function buildPdfHtml(data, user) {
   const groupedPages = groupItemsForPDF(data.items);
 
-const pages = [
-  renderCoverPage(data, user),
-  ...groupedPages.map((group,index) => {
-    if (group.length === 1 && group[0].isCombination) {
-    return renderItemPage(data, group[0],index === 0);
-  }
-    return `
+  const pages = [
+    renderCoverPage(data, user),
+    ...groupedPages.map((group, index) => {
+      if (group.length === 1 && group[0].isCombination) {
+        return renderItemPage(data, group[0], index === 0);
+      }
+      return `
       <section class="page">
-       ${
-      index === 0
-        ? `
+       ${index === 0
+          ? `
           <h2 class="page-title">Window Design, Specification and Value</h2>
 
           <div class="customer-line">
@@ -1456,16 +1579,16 @@ const pages = [
             Below is the proposed specification and commercial value for the selected windows and doors.
           </div>
         `
-        : ""
-    }
+          : ""
+        }
         ${group.map((item) => renderMainItemCard(item)).join("")}
       </section>
     `;
-  }),
+    }),
 
-  renderSummaryPage(data),
-  renderTermsPage(data),
-].join("");
+    renderSummaryPage(data),
+    renderTermsPage(data),
+  ].join("");
 
 
   return `
@@ -1799,11 +1922,29 @@ const pages = [
 function buildElevationHtml(data) {
   const items = data.items;
 
+  // const rows = [];
+
+  // for (let i = 0; i < items.length; i += 2) {
+  //   const item1 = items[i];
+  //   const item2 = items[i + 1];
+
+  //   rows.push(`
+  //     <div class="row">
+  //       ${renderItem(item1)}
+  //       ${item2 ? renderItem(item2) : ""}
+  //     </div>
+  //   `);
+  // }
+
+  const pages = [];
+
+for (let i = 0; i < items.length; i += 4) {
+  const pageItems = items.slice(i, i + 4);
   const rows = [];
 
-  for (let i = 0; i < items.length; i += 2) {
-    const item1 = items[i];
-    const item2 = items[i + 1];
+  for (let j = 0; j < pageItems.length; j += 2) {
+    const item1 = pageItems[j];
+    const item2 = pageItems[j + 1];
 
     rows.push(`
       <div class="row">
@@ -1812,6 +1953,35 @@ function buildElevationHtml(data) {
       </div>
     `);
   }
+
+  pages.push(`
+    <div class="elevation-page">
+      ${rows.join("")}
+    </div>
+  `);
+}
+
+function renderCombinationField(item, field) {
+  if (!item.isCombination) {
+    return escapeHtml(item[field]);
+  }
+
+  const subItems = (item.subItems || []).filter(
+    (sub) =>
+      sub.systemType !== "Blank Area" &&
+      sub.description !== "Blank Area"
+  );
+
+  if (!subItems.length) {
+    return "-";
+  }
+
+  return subItems
+    .map((sub, index) => {
+      return `${index + 1}) ${escapeHtml(sub[field])}`;
+    })
+     .join("<br>");
+}
 
   function renderItem(item) {
     return `
@@ -1829,10 +1999,37 @@ function buildElevationHtml(data) {
           <hr/>
 
           <div class="line2">
-            <span><b>Width:</b> ${item.width}</span>
-            <span><b>Height:</b> ${item.height}</span>
-            <span><b>Area:</b> ${item.area.toFixed(2)}</span>
+            <span><b>Width:</b> ${item.width} mm</span>
+            <span><b>Height:</b> ${item.height} mm</span>
+            <span><b>Area:</b> ${item.area.toFixed(2)} Sq.ft</span>
           </div>
+          <div class="details-divider"></div>
+          <div class="spec-section">
+
+  <div class="spec-column">
+    <div class="spec-title">Glass Spec</div>
+    <div class="spec-values">
+      ${renderCombinationField(item, "glassSpec")}
+    </div>
+  </div>
+
+  <div class="spec-column">
+    <div class="spec-title">Series</div>
+    <div class="spec-values">
+      ${renderCombinationField(item, "series")}
+    </div>
+  </div>
+
+  <div class="spec-column">
+    <div class="spec-title">Description</div>
+    <div class="spec-values">
+      ${renderCombinationField(item, "description")}
+    </div>
+  </div>
+
+</div>
+
+
         </div>
       </div>
     `;
@@ -1877,7 +2074,7 @@ function buildElevationHtml(data) {
 }
 
 .customer-header {
-  background: #f2f2f2;
+  background: #fff;
   padding: 8px;
   font-weight: bold;
   border-bottom: 1px solid #ccc;
@@ -1934,8 +2131,23 @@ function buildElevationHtml(data) {
           border: 1px solid #ddd;
           border-radius: 8px;
           padding: 10px;
-          background: #fafafa;
+          background: #fff;
         }
+         .elevation-page {
+  page-break-after: always;
+  break-after: page;
+  padding-top: 40px;
+  box-sizing: border-box;
+}
+
+.elevation-page:last-child {
+  page-break-after: auto;
+  break-after: auto;
+}
+  .details-divider {
+  border-top: 1px dashed #ccc;
+  margin: 6px 0;
+}
 
         .img-box {
           display: flex;
@@ -1955,11 +2167,46 @@ function buildElevationHtml(data) {
           padding: 5px 0;
         }
 
-        .line1, .line2 {
+        .line1, .line2{
           display: flex;
           justify-content: space-between;
           font-size: 11px;
         }
+          .spec-section {
+  display: grid;
+  grid-template-columns: 1.35fr 0.8fr 1.35fr;
+  gap: 0;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.spec-column {
+  padding: 0 10px;
+  min-width: 0;
+}
+
+.spec-column:first-child {
+  padding-left: 0;
+}
+
+.spec-column:last-child {
+  padding-right: 0;
+}
+
+.spec-column + .spec-column {
+  border-left: 1px solid #ddd;
+}
+
+.spec-title {
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.spec-values {
+  line-height: 1.45;
+  word-break: break-word;
+}
 
         hr {
           border: none;
@@ -2029,7 +2276,7 @@ function buildElevationHtml(data) {
 </div>
 
       <!-- ITEMS -->
-      ${rows.join("")}
+      ${pages.join("")}
 
     </body>
   </html>
@@ -2188,79 +2435,79 @@ const exportQuotationExcel = async (req, res) => {
       { header: "Mesh Type", key: "meshType", width: 18 },
       { header: "Rate", key: "rate", width: 12 },
       ...(includeAmount
-         ? [{ header: "Amount", key: "amount", width: 15 }]
-         : []),
+        ? [{ header: "Amount", key: "amount", width: 15 }]
+        : []),
     ];
 
     worksheet.getRow(1).font = { bold: true };
-   quotation.items.forEach((item) => {
-  const parentRow =
-  worksheet.addRow({
-    refCode: item.refCode,
-    location: item.location || "",
-    width: item.systemType === "Combination" ? "" : item.width,
-    height: item.systemType === "Combination" ? "" : item.height,
-    quantity: item.systemType === "Combination" ? "" : item.quantity,
-    area: item.systemType === "Combination" ? "" : item.area,
-    systemType: item.systemType,
-    series: item.systemType === "Combination" ? "" : item.series,
-    description: item.systemType === "Combination" ? "" : item.description,
-    colorFinish: item.systemType === "Combination" ? "" : item.colorFinish,
-    glassSpec: item.systemType === "Combination" ? "" : item.glassSpec,
-    handleType: item.systemType === "Combination" ? "" : item.handleType,
-    handleColor: item.systemType === "Combination" ? "" : item.handleColor,
-    meshPresent:
-      item.systemType === "Combination"
-        ? ""
-        : item.meshPresent
-        ? "Yes"
-        : "No",
-    meshType: item.systemType === "Combination" ? "" : item.meshType,
-    rate: item.systemType === "Combination" ? "" : item.rate,
-    ...(includeAmount && {
-  amount: item.systemType === "Combination" ? "" : item.amount,
-}),
-    remarks: item.systemType === "Combination" ? "" : item.remarks,
-  });
-   if (item.systemType === "Combination") {
-    parentRow.font = { bold: true };
-  }
-  if (
-    item.systemType === "Combination" &&
-    Array.isArray(item.subItems) &&
-    item.subItems.length > 0
-  ) {
-    item.subItems.forEach((sub) => {
-      const childRow =
-      worksheet.addRow({
-        refCode: `↳ ${sub.refCode}`,
-        location: sub.location || "",
-        width: sub.width,
-        height: sub.height,
-        quantity: sub.quantity,
-        area: sub.area,
-        systemType: sub.systemType,
-        series: sub.series,
-        description: sub.description,
-        colorFinish: sub.colorFinish,
-        glassSpec: sub.glassSpec,
-        handleType: sub.handleType,
-        handleColor: sub.handleColor,
-        meshPresent: sub.meshPresent ? "Yes" : "No",
-        meshType: sub.meshType,
-        rate: sub.rate,
-        ...(includeAmount && {
-  amount: sub.amount,
-}),
-      });
-childRow.fill = {
-  type: "pattern",
-  pattern: "solid",
-  fgColor: { argb: "FFF2F2F2" }, 
-};
+    quotation.items.forEach((item) => {
+      const parentRow =
+        worksheet.addRow({
+          refCode: item.refCode,
+          location: item.location || "",
+          width: item.systemType === "Combination" ? "" : item.width,
+          height: item.systemType === "Combination" ? "" : item.height,
+          quantity: item.systemType === "Combination" ? "" : item.quantity,
+          area: item.systemType === "Combination" ? "" : item.area,
+          systemType: item.systemType,
+          series: item.systemType === "Combination" ? "" : item.series,
+          description: item.systemType === "Combination" ? "" : item.description,
+          colorFinish: item.systemType === "Combination" ? "" : item.colorFinish,
+          glassSpec: item.systemType === "Combination" ? "" : item.glassSpec,
+          handleType: item.systemType === "Combination" ? "" : item.handleType,
+          handleColor: item.systemType === "Combination" ? "" : item.handleColor,
+          meshPresent:
+            item.systemType === "Combination"
+              ? ""
+              : item.meshPresent
+                ? "Yes"
+                : "No",
+          meshType: item.systemType === "Combination" ? "" : item.meshType,
+          rate: item.systemType === "Combination" ? "" : item.rate,
+          ...(includeAmount && {
+            amount: item.systemType === "Combination" ? "" : item.amount,
+          }),
+          remarks: item.systemType === "Combination" ? "" : item.remarks,
+        });
+      if (item.systemType === "Combination") {
+        parentRow.font = { bold: true };
+      }
+      if (
+        item.systemType === "Combination" &&
+        Array.isArray(item.subItems) &&
+        item.subItems.length > 0
+      ) {
+        item.subItems.forEach((sub) => {
+          const childRow =
+            worksheet.addRow({
+              refCode: `↳ ${sub.refCode}`,
+              location: sub.location || "",
+              width: sub.width,
+              height: sub.height,
+              quantity: sub.quantity,
+              area: sub.area,
+              systemType: sub.systemType,
+              series: sub.series,
+              description: sub.description,
+              colorFinish: sub.colorFinish,
+              glassSpec: sub.glassSpec,
+              handleType: sub.handleType,
+              handleColor: sub.handleColor,
+              meshPresent: sub.meshPresent ? "Yes" : "No",
+              meshType: sub.meshType,
+              rate: sub.rate,
+              ...(includeAmount && {
+                amount: sub.amount,
+              }),
+            });
+          childRow.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF2F2F2" },
+          };
+        });
+      }
     });
-  }
-});
     const fileName = `Quotation-${quotation.generatedId || quotation._id}.xlsx`;
 
     res.setHeader(
@@ -2346,6 +2593,7 @@ module.exports = {
   getQuotationById,
   updateQuotationById,
   deleteQuotationById,
+  duplicateQuotationById,
   generateQuotationPdfController,
   renderQuotationPdfBuffer,
   generateElevationPdfController,
