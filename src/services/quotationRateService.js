@@ -14,10 +14,34 @@ const { resolveLinkedHardware } = require("../utils/hardwareLinking");
 
 const DEFAULT_PROFILE_ADJUSTMENT = 100;
 const CUT_ALLOWANCE_MM = 10;
+const LOUVER_RATE_PER_SQFT = 500;
 
 const round2 = (value) => Math.round(toNumber(value) * 100) / 100;
 
 const isLouverItem = (item = {}) => String(item.systemType || "").trim() === "Louvers";
+
+const calculateFixedLouverRate = (item = {}) => {
+  const width = toNumber(item.frameWidth, toNumber(item.width));
+  const height = toNumber(item.frameHeight, toNumber(item.height));
+  const area = toNumber(item.area) ||
+    (width > 0 && height > 0 ? (width * height) / (304.8 * 304.8) : 0);
+  if (area <= 0) throw new Error("Item area must be greater than zero");
+
+  return {
+    clientId: String(item.clientId || item.id || ""),
+    baseRate: LOUVER_RATE_PER_SQFT,
+    materialValue: round2(area * LOUVER_RATE_PER_SQFT),
+    area: round3(area),
+    totalWeightKg: 0,
+    profiles: [],
+    otherMaterials: [],
+    warnings: [],
+    nalcoPrice: 0,
+    nalcoRatePerKg: 0,
+    calculatedAt: new Date().toISOString(),
+    calculationVersion: 3,
+  };
+};
 
 const cuttingScheduleIdentity = (item = {}) => ({
   systemType: String(item.systemType || "").trim(),
@@ -326,7 +350,11 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
       throw new Error("systemType, series and description are required");
     }
   });
-  const configFilters = regularItems.map(cuttingScheduleFilter);
+  if (sourceItems.every(isLouverItem)) {
+    return sourceItems.map(calculateFixedLouverRate);
+  }
+
+  const configFilters = regularItems.filter((item) => !isLouverItem(item)).map(cuttingScheduleFilter);
   const [configs, glassBeadingConfigs, hardwareLinkingConfigs, mullionConfigs, products, hardware, profileOptions, user, nalcoPrice] = await Promise.all([
     CuttingScheduleConfig.find({ $or: configFilters }).lean(),
     GlassBeadingConfig.find({ $or: configFilters }).lean(),
@@ -366,6 +394,9 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
   const mullionConfigMap = new Map(mullionConfigs.map((config) => [`${config.systemType}||${config.series}`, config]));
 
   return sourceItems.map((item) => {
+    if (isLouverItem(item)) {
+      return calculateFixedLouverRate(item);
+    }
     if (item.itemType === "join") {
       const config = mullionConfigMap.get(`${item.systemType}||${item.series}`);
       const configuredLines = item.joinType === "Mullion" ? config?.mullions : config?.couplers;
@@ -424,5 +455,6 @@ module.exports = {
     getJoinPricingLines,
     resolveProfileAdjustment,
     scheduleKeyForItem,
+    calculateFixedLouverRate,
   },
 };

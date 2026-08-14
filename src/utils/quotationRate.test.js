@@ -10,6 +10,7 @@ const {
     getJoinPricingLines,
     resolveProfileAdjustment,
     scheduleKeyForItem,
+    calculateFixedLouverRate,
   },
 } = require("../services/quotationRateService");
 
@@ -37,6 +38,20 @@ test("Louvers use one system-level cutting schedule identity", () => {
     cuttingScheduleMapKey({ systemType: "Casement", series: "40mm", description: "Fix" }),
     "Casement||40mm||Fix"
   );
+});
+
+test("Louvers use a fixed rate of 500 per square foot", () => {
+  const result = calculateFixedLouverRate({
+    clientId: "louver-1",
+    systemType: "Louvers",
+    area: 10,
+  });
+
+  assert.equal(result.clientId, "louver-1");
+  assert.equal(result.baseRate, 500);
+  assert.equal(result.materialValue, 5000);
+  assert.equal(result.area, 10);
+  assert.equal(result.calculationVersion, 3);
 });
 
 test("cutting schedule profile weight produces a per-square-foot base rate", () => {
