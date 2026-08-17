@@ -1222,8 +1222,9 @@ function renderMainItemCard(item) {
           <td class="label">Location</td>
            <td>${escapeHtml(item.location)}</td>
           <td class="label">Glass</td>
-           <td>${item.systemType === "Combination"
-      ? "NA" : escapeHtml(item.glassSpec)}</td>
+          <td>${item.systemType === "Combination" || item.systemType === "Louvers"
+  ? "NA"
+  : escapeHtml(item.glassSpec)}</td>
           <td class="label">Mesh</td>
           <td>${item.systemType === "Combination"
       ? "NA"
@@ -1291,16 +1292,14 @@ function renderSubItemsTable(subItems) {
             <th>Series</th>
             <th>W</th>
             <th>H</th>
-            <th>Area</th>
+            <th>Area (Sq.ft)</th>
             <th>Color</th>
             <th>Location</th>
             <th>Description</th>
             <th>Glass</th>
             <th>Handle</th>
             <th>Mesh</th>
-            <th>Rate</th>
             <th>Qty</th>
-            <th>Amount</th>
             <th>Remarks</th>
           </tr>
         </thead>
@@ -1328,12 +1327,10 @@ function renderSubItemsTable(subItems) {
                   <td>${escapeHtml(sub.colorFinish)}</td>
                   <td>${escapeHtml(sub.location)}</td>
                   <td>${escapeHtml(sub.description)}</td>
-                  <td>${escapeHtml(sub.glassSpec)}</td>
+                  <td>${sub.systemType === "Louvers"? "NA": escapeHtml(sub.glassSpec)}</td>
                   <td>${escapeHtml(formatHandle(sub.handleType, sub.handleColor))}</td>
                   <td>${escapeHtml(formatMesh(sub.meshPresent, sub.meshType))}</td>
-                  <td>${formatCurrency(sub.rate)}</td>
                   <td>${sub.quantity}</td>
-                  <td>${formatCurrency(sub.amount)}</td>
                   <td>${escapeHtml(sub.remarks)}</td>
                 </tr>
               `;
