@@ -1292,16 +1292,14 @@ function renderSubItemsTable(subItems) {
             <th>Series</th>
             <th>W</th>
             <th>H</th>
-            <th>Area</th>
+            <th>Area (Sq.ft)</th>
             <th>Color</th>
             <th>Location</th>
             <th>Description</th>
             <th>Glass</th>
             <th>Handle</th>
             <th>Mesh</th>
-            <th>Rate</th>
             <th>Qty</th>
-            <th>Amount</th>
             <th>Remarks</th>
           </tr>
         </thead>
@@ -1332,9 +1330,7 @@ function renderSubItemsTable(subItems) {
                   <td>${sub.systemType === "Louvers"? "NA": escapeHtml(sub.glassSpec)}</td>
                   <td>${escapeHtml(formatHandle(sub.handleType, sub.handleColor))}</td>
                   <td>${escapeHtml(formatMesh(sub.meshPresent, sub.meshType))}</td>
-                  <td>${formatCurrency(sub.rate)}</td>
                   <td>${sub.quantity}</td>
-                  <td>${formatCurrency(sub.amount)}</td>
                   <td>${escapeHtml(sub.remarks)}</td>
                 </tr>
               `;
