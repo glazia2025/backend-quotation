@@ -1894,8 +1894,13 @@ const getDisplayCutAngles = (section) => {
 };
 
 const buildPdfHtml = (data) => {
-  const date = data.generatedAt.toLocaleDateString("en-IN");
-  const time = data.generatedAt.toLocaleTimeString("en-IN");
+  const date = data.generatedAt.toLocaleDateString("en-IN", {
+  timeZone: "Asia/Kolkata",
+});
+
+const time = data.generatedAt.toLocaleTimeString("en-IN", {
+  timeZone: "Asia/Kolkata",
+});
 
   return `
     <!doctype html>
