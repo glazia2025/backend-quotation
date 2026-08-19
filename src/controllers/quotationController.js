@@ -1980,6 +1980,24 @@ function renderCombinationField(item, field) {
      .join("<br>");
 }
 
+function renderCombinationHandle(item) {
+  if (!item.isCombination) {
+    return escapeHtml(formatHandle(item.handleType, item.handleColor));
+  }
+
+  const subItems = (item.subItems || []).filter(
+    (sub) =>
+      sub.systemType !== "Blank Area" &&
+      sub.description !== "Blank Area"
+  );
+
+  if (!subItems.length) return "-";
+
+  return subItems
+    .map((sub, index) => `${index + 1}) ${escapeHtml(formatHandle(sub.handleType, sub.handleColor))}`)
+    .join("<br>");
+}
+
   function renderItem(item) {
     return `
       <div class="item">
@@ -1991,6 +2009,7 @@ function renderCombinationField(item, field) {
           <div class="line1">
             <span><b>Ref Code:</b> ${item.refCode}</span>
             <span><b>Location:</b> ${item.location}</span>
+            <span><b>Quantity:</b> ${item.quantity}</span>
           </div>
 
           <hr/>
@@ -2024,6 +2043,22 @@ function renderCombinationField(item, field) {
     </div>
   </div>
 
+</div>
+
+<div class="spec-section spec-section-secondary">
+  <div class="spec-column">
+    <div class="spec-title">Frame Colour</div>
+    <div class="spec-values">
+      ${renderCombinationField(item, "colorFinish")}
+    </div>
+  </div>
+
+  <div class="spec-column">
+    <div class="spec-title">Handle</div>
+    <div class="spec-values">
+      ${renderCombinationHandle(item)}
+    </div>
+  </div>
 </div>
 
 
@@ -2194,6 +2229,12 @@ function renderCombinationField(item, field) {
   border-left: 1px solid #ddd;
 }
 
+.spec-section-secondary {
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid #ddd;
+  padding-top: 8px;
+}
+
 .spec-title {
   font-weight: 700;
   font-size: 11px;
@@ -2355,10 +2396,16 @@ const generateQuotationPdfController = async (req, res) => {
       },
     });
 
-    const fileName = `${safeString(quotation.quotationDetails?.id) ||
+    const quotationNumber = safeString(quotation.quotationDetails?.id) ||
       safeString(quotation.generatedId) ||
-      "quotation"
-      }.pdf`;
+      "quotation";
+    const sanitizeFileNamePart = (value) => String(value || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const safeQuotationNumber = sanitizeFileNamePart(quotationNumber) || "quotation";
+    const customerName = sanitizeFileNamePart(quotation.customerDetails?.name);
+    const fileName = `${safeQuotationNumber}${customerName ? `_${customerName}` : ""}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
