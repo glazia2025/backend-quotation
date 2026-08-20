@@ -8,7 +8,7 @@ const HandleOption = require("../models/Quotation/HandleOption");
 const User = require("../models/User");
 const Quotation = require("../models/Quotation/Quotation");
 
-const { normalizeRateMap, restoreRateMap } = require("../utils/rateMapUtils");
+const { normalizeRateMap, restoreRateMap, normalizeStringMap, restoreStringMap } = require("../utils/rateMapUtils");
 const { ensureColorDefaults } = require("../utils/handleOptionUtils");
 
 const normalizeThreeRates = (input) => {
@@ -176,10 +176,12 @@ const createOptionSet = async (req, res) => {
     const optionSet = await OptionSet.create({
       ...payload,
       values: normalizeRateMap(payload.values),
+      colors: normalizeStringMap(payload.colors),
       system: constrainedTypes.includes(payload.type) ? undefined : system?._id,
     });
     const normalized = optionSet.toObject();
     normalized.values = restoreRateMap(optionSet.values);
+    normalized.colors = restoreStringMap(optionSet.colors);
     res.status(201).json(normalized);
   } catch (error) {
     console.error("createOptionSet error", error);
@@ -205,6 +207,7 @@ const listOptionSets = async (req, res) => {
     const restored = optionSets.map((item) => ({
       ...item,
       values: restoreRateMap(item.values),
+      colors: restoreStringMap(item.colors),
     }));
     res.json({ optionSets: restored });
   } catch (error) {
@@ -215,7 +218,7 @@ const listOptionSets = async (req, res) => {
 
 const updateOptionSet = async (req, res) => {
   try {
-    const { values, ...rest } = req.body;
+    const { values, colors, ...rest } = req.body;
     const payload = { ...rest };
     const constrainedTypes = ["colorFinish", "glassSpec", "meshType"];
     if (payload.type && constrainedTypes.includes(payload.type)) {
@@ -224,6 +227,7 @@ const updateOptionSet = async (req, res) => {
     if (values !== undefined) {
       payload.values = normalizeRateMap(values);
     }
+    if (colors !== undefined) payload.colors = normalizeStringMap(colors);
     const optionSet = await OptionSet.findByIdAndUpdate(req.params.id, payload, {
       new: true,
       runValidators: true,
@@ -231,6 +235,7 @@ const updateOptionSet = async (req, res) => {
     if (!optionSet) return res.status(404).json({ message: "Option set not found" });
     const normalized = optionSet.toObject();
     normalized.values = restoreRateMap(optionSet.values);
+    normalized.colors = restoreStringMap(optionSet.colors);
     res.json(normalized);
   } catch (error) {
     console.error("updateOptionSet error", error);

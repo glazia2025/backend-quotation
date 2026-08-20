@@ -39,7 +39,26 @@ const restoreRateMap = (input) => {
   }, {});
 };
 
+const normalizeStringMap = (input) => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.entries(input).reduce((acc, [key, value]) => {
+    if (typeof value === "string" && value.trim()) acc[escapeMongoKey(key)] = value.trim();
+    return acc;
+  }, {});
+};
+
+const restoreStringMap = (input) => {
+  if (!input) return {};
+  const entries = input instanceof Map ? Array.from(input.entries()) : Object.entries(input);
+  return entries.reduce((acc, [key, value]) => {
+    if (typeof value === "string" && value.trim()) acc[restoreMongoKey(key)] = value.trim();
+    return acc;
+  }, {});
+};
+
 module.exports = {
   normalizeRateMap,
   restoreRateMap,
+  normalizeStringMap,
+  restoreStringMap,
 };

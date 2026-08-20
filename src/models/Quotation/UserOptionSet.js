@@ -14,6 +14,7 @@ const userOptionSetSchema = new mongoose.Schema(
       required: true,
       default: {},
     },
+    colors: { type: Map, of: String, default: {} },
   },
   { timestamps: true }
 );

@@ -8,7 +8,7 @@ const UserDescriptionRate = require("../models/Quotation/UserDescriptionRate");
 const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const UserHardware = require("../models/Quotation/UserHardware");
 const UserHardwareRate = require("../models/Quotation/UserHardwareRate");
-const { normalizeRateMap, restoreRateMap } = require("../utils/rateMapUtils");
+const { normalizeRateMap, restoreRateMap, normalizeStringMap, restoreStringMap } = require("../utils/rateMapUtils");
 const { ensureColorDefaults, groupHandleOptionsBySystem } = require("../utils/handleOptionUtils");
 
 const ALLOWED_OPTION_TYPES = ["colorFinish", "glassSpec", "meshType"];
@@ -63,7 +63,7 @@ const resolveAdminFallbackRate = (adminRate, userRate) => {
   return asUserRate;
 };
 
-const mergeOptionItems = (adminValues = {}, userValues = {}) => {
+const mergeOptionItems = (adminValues = {}, userValues = {}, adminColors = {}, userColors = {}) => {
   const allNames = Array.from(new Set([...Object.keys(adminValues), ...Object.keys(userValues)])).sort();
   return allNames.map((name) => {
     const adminRate = adminValues[name];
@@ -79,6 +79,7 @@ const mergeOptionItems = (adminValues = {}, userValues = {}) => {
       userRate: hasUser ? Number(userRate) || 0 : null,
       source: hasAdmin ? "admin" : "user",
       canDelete: !hasAdmin,
+      color: userColors[name] || adminColors[name] || "",
     };
   });
 };
@@ -249,17 +250,19 @@ const listOptionSets = async (req, res) => {
       return acc;
     }, {});
     const userByType = userDocs.reduce((acc, doc) => {
-      acc[doc.type] = restoreRateMap(doc.values);
+      acc[doc.type] = { values: restoreRateMap(doc.values), colors: restoreStringMap(doc.colors) };
       return acc;
     }, {});
 
     const optionSets = types.map((t) => {
       const typeDocs = adminByType[t] || [];
-      const userValues = userByType[t] || {};
+      const userValues = userByType[t]?.values || {};
+      const userColors = userByType[t]?.colors || {};
 
       const globalAdminDoc = typeDocs.find((doc) => !doc.system);
       const adminValues = restoreRateMap(globalAdminDoc?.values);
-      const items = mergeOptionItems(adminValues, userValues);
+      const adminColors = restoreStringMap(globalAdminDoc?.colors);
+      const items = mergeOptionItems(adminValues, userValues, adminColors, userColors);
 
       return {
         type: t,
@@ -288,12 +291,13 @@ const replaceOptionSet = async (req, res) => {
   try {
     const doc = await UserOptionSet.findOneAndUpdate(
       { user: toUserId(req), type },
-      { values: normalizeRateMap(req.body.values || {}) },
+      { values: normalizeRateMap(req.body.values || {}), colors: normalizeStringMap(req.body.colors || {}) },
       { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     const normalized = doc.toObject();
     normalized.values = restoreRateMap(doc.values);
+    normalized.colors = restoreStringMap(doc.colors);
     res.json(normalized);
   } catch (error) {
     console.error("replaceOptionSet error", error);
@@ -307,7 +311,7 @@ const upsertOptionItem = async (req, res) => {
   const { type } = req.params;
   if (!ensureAllowedType(type, res)) return;
 
-  const { name, rate } = req.body;
+  const { name, rate, color } = req.body;
   if (!name || typeof name !== "string") {
     return res.status(400).json({ message: "name is required" });
   }
@@ -326,14 +330,17 @@ const upsertOptionItem = async (req, res) => {
 
     const key = escapeMongoKey(name);
     const numericRate = Number(rate) || 0;
+    const setFields = { [`values.${key}`]: numericRate };
+    if (type === "colorFinish" && typeof color === "string" && color.trim()) setFields[`colors.${key}`] = color.trim();
     const updated = await UserOptionSet.findOneAndUpdate(
       { user: toUserId(req), type },
-      { $set: { [`values.${key}`]: numericRate } },
+      { $set: setFields },
       { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     const normalized = updated.toObject();
     normalized.values = restoreRateMap(updated.values);
+    normalized.colors = restoreStringMap(updated.colors);
     res.json(normalized);
   } catch (error) {
     console.error("upsertOptionItem error", error);
@@ -362,7 +369,7 @@ const deleteOptionItem = async (req, res) => {
     const key = escapeMongoKey(name);
     const updated = await UserOptionSet.findOneAndUpdate(
       { user: toUserId(req), type },
-      { $unset: { [`values.${key}`]: 1 } },
+      { $unset: { [`values.${key}`]: 1, [`colors.${key}`]: 1 } },
       { new: true }
     );
 
@@ -394,20 +401,25 @@ const setAdminOptionItemRate = async (req, res) => {
 
     const key = escapeMongoKey(name);
     const numericRate = Number(req.body.rate) || 0;
+    const color = typeof req.body.color === "string" ? req.body.color.trim() : "";
+    const setFields = { [`values.${key}`]: numericRate };
+    if (type === "colorFinish" && color) setFields[`colors.${key}`] = color;
     const updated = await UserOptionSet.findOneAndUpdate(
       { user: toUserId(req), type },
-      { $set: { [`values.${key}`]: numericRate } },
+      { $set: setFields },
       { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
     const normalized = updated.toObject();
     normalized.values = restoreRateMap(updated.values);
+    normalized.colors = restoreStringMap(updated.colors);
     res.json({
       type,
       name,
       adminRate: Number(adminValues[name]) || 0,
       userRate: numericRate,
       rate: resolveAdminFallbackRate(adminValues[name], numericRate),
+      color: color || restoreStringMap(adminOptionSet?.colors)[name] || "",
       optionSet: normalized,
     });
   } catch (error) {

@@ -47,7 +47,7 @@ const toBooleanFlag = (value) => {
   return Boolean(value);
 };
 
-const { restoreRateMap } = require("../utils/rateMapUtils");
+const { restoreRateMap, restoreStringMap } = require("../utils/rateMapUtils");
 
 const mapToArray = (map) => {
   const restored = restoreRateMap(map);
@@ -150,7 +150,7 @@ const getNextQuotationId = async (userId) => {
 const fetchOptionValues = async (type, systemDoc) => {
   if (type === "colorFinish" || type === "meshType" || type === "glassSpec") {
     const globalOption = await OptionSet.findOne({ type, system: { $exists: false } }).lean();
-    return mapToArray(globalOption?.values);
+    return mapToArray(globalOption?.values).map((item) => ({ ...item, color: restoreStringMap(globalOption?.colors)[item.name] || "" }));
   }
 
   if (systemDoc) {
@@ -313,7 +313,7 @@ const getOptionLists = async (req, res) => {
     console.log('userOptionSets', userOptionSets);
 
     const userOptionMap = userOptionSets.reduce((acc, row) => {
-      acc[row.type] = restoreRateMap(row.values);
+      acc[row.type] = { values: restoreRateMap(row.values), colors: restoreStringMap(row.colors) };
       return acc;
     }, {});
 
@@ -324,13 +324,15 @@ const getOptionLists = async (req, res) => {
         acc[row.name] = numberOr(row.rate, 0);
         return acc;
       }, {});
-      const userMap = userOptionMap[type] || {};
+      const userMap = userOptionMap[type]?.values || {};
+      const userColors = userOptionMap[type]?.colors || {};
       const names = unique([...Object.keys(adminMap), ...Object.keys(userMap)]).sort();
       return names.map((name) => ({
         name,
         rate: Object.prototype.hasOwnProperty.call(adminMap, name)
           ? effectiveRateWithAdminFallback(adminMap[name], userMap[name])
           : numberOr(userMap[name], 0),
+        color: userColors[name] || adminItems.find((item) => item.name === name)?.color || "",
       }));
     };
 
