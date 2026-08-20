@@ -1050,12 +1050,16 @@ const addBomRow = (groups, row) => {
       ...row,
       quantity: 0,
       amount: 0,
+      weightKg: 0,
     });
   }
 
   const existing = groups.get(key);
   existing.quantity = round3(existing.quantity + toNumber(row.quantity));
   existing.amount = round2(existing.amount + toNumber(row.amount));
+  existing.weightKg = round3(
+    existing.weightKg + toNumber(row.weightKg)
+  );
 };
 
 const getScheduledLineQuantity = (formula, variables, itemQuantity) =>
@@ -1182,8 +1186,12 @@ const buildBomData = async (quotation) => {
           leftoverBySap
         );
         const weightKg = round3(
-          result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm, 0)
-        );
+  result.profilesUsed *
+    (toNumber(product?.length, 0) / 1000) *
+    toNumber(product?.kgm, 0)
+);
+
+
         addBomRow(groups, {
           type: "Profile",
           system: item.systemType,
@@ -1195,6 +1203,8 @@ const buildBomData = async (quotation) => {
           measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
           rate,
           amount: rate * weightKg,
+          weightKg,
+
         });
         continue;
       }
@@ -1258,6 +1268,11 @@ const buildBomData = async (quotation) => {
           leftoverBySap
         );
         const beadingAmount = round2(result.profilesUsed * beadingRate);
+        const beadingWeightKg = round3(
+  result.profilesUsed *
+    (stockLength / 1000) *
+    toNumber(beadingProduct?.kgm, 0)
+);
         addBomRow(groups, {
           type: "Beading",
           system: item.systemType,
@@ -1269,6 +1284,7 @@ const buildBomData = async (quotation) => {
         measureLabel: `${round3(lengthMm)} mm`,
           rate: beadingRate,
           amount: beadingAmount,
+          weightKg: beadingWeightKg,
         });
       });
       }
@@ -1337,9 +1353,13 @@ const buildBomData = async (quotation) => {
         toNumber(product?.length),
         leftoverBySap
       );
+      
       const weightKg = round3(
-        result.profilesUsed * (lengthMm / 1000) * toNumber(product?.kgm)
-      );
+  result.profilesUsed *
+    (toNumber(product?.length, 0) / 1000) *
+    toNumber(product?.kgm, 0)
+);
+
       const adjustment = getProfileAdjustment(product, pricingContext);
       const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
       addBomRow(groups, {
@@ -1355,6 +1375,8 @@ const buildBomData = async (quotation) => {
         measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
         rate,
         amount: rate * weightKg,
+        weightKg,
+
       });
       }
     }
@@ -1365,6 +1387,14 @@ const buildBomData = async (quotation) => {
       `${b.type} ${b.description} ${b.itemCode}`
     )
   );
+  const totalWeight = round3(
+  rows.reduce(
+    (sum, row) => sum + toNumber(row.weightKg),
+    0
+  )
+);
+
+
 
   const totals = rows.reduce(
     (acc, row) => {
@@ -1383,6 +1413,7 @@ const buildBomData = async (quotation) => {
     generatedAt: new Date(),
     nalcoPrice: pricingContext.nalcoPrice,
     rows,
+    totalWeight,
     totals,
     notes,
   };
@@ -1991,9 +2022,13 @@ const buildPdfHtml = (data) => {
   `;
 };
 
-const renderBomRows = (rows = []) =>
-  rows.length
-    ? rows
+const renderBomRows = (rows = []) =>{
+  const visibleRows = rows.filter((row) => toNumber(row.quantity) > 0);
+
+  return visibleRows.length
+    ? visibleRows
+  // rows.length
+  //   ? rows
       .map(
         (row, index) => `
           <tr>
@@ -2012,6 +2047,7 @@ const renderBomRows = (rows = []) =>
       )
       .join("")
     : '<tr><td colspan="8" class="empty">No BOM items to show.</td></tr>';
+};
 
 const buildBomPdfHtml = (data) => {
   const invoiceDateParts = data.generatedAt
@@ -2214,7 +2250,12 @@ const buildBomPdfHtml = (data) => {
                 <div class="label">NALCO Price Used</div>
                 <div class="muted">${currency(toNumber(data.nalcoPrice) / 1000)} / Kg</div>
               </div>
+               <div style="margin-top: 12px;">
+  <div class="label">Total Weight of BOM</div>
+  <div class="muted">${round3(data.totalWeight)} Kg</div>
+</div>
             </div>
+          
             <div>
               <table class="totals-table">
                 <tr>
