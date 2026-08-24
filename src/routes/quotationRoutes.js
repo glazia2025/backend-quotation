@@ -44,7 +44,7 @@ const {
   createOrUpdateQuotationConfig,
 } = require("../controllers/quotationConfig");
 
-const {getChartData,getDashboardStats}=require("../controllers/chartController");
+const {getChartData,getDashboardStats,getSalesPerMonth}=require("../controllers/chartController");
 
 router.get("/systems", getSystems);
 router.get("/systems/:systemType/series", getSeries);
@@ -89,6 +89,7 @@ router.get("/:id/optimized-final", isUser, getOptimizedFinal);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
 router.get("/chart/:userId",getChartData);
 router.get("/stats/:userId", getDashboardStats);
+router.get("/sales-per-month/:userId", getSalesPerMonth);
 
 
 module.exports = router;
