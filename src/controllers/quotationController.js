@@ -1011,6 +1011,7 @@ function prepareQuotationPdfData(quotation) {
     website: safeString(quotation?.globalConfig?.website),
     terms: safeString(quotation?.globalConfig?.terms),
     prerequisites: safeString(quotation?.globalConfig?.prerequisites),
+    paymentInfo: safeString(quotation?.globalConfig?.paymentInfo),
     additionalCosts: {
       installation: toNumber(quotation?.globalConfig?.additionalCosts?.installation),
       transport: toNumber(quotation?.globalConfig?.additionalCosts?.transport),
@@ -1474,8 +1475,9 @@ function renderSummaryPage(data) {
 function renderTermsPage(data) {
   const terms = data.globalConfig.terms || data.quotationDetails.terms || "";
   const prerequisites = data.globalConfig.prerequisites || "";
+  const paymentInfo = data.globalConfig.paymentInfo || "";
 
-  if (!prerequisites && !terms) return "";
+  if (!prerequisites && !terms && !paymentInfo) return "";
 
   return `
     <section class="page">
@@ -1521,6 +1523,16 @@ function renderTermsPage(data) {
           <div class="text-block">
             <div class="section-title">Terms & Conditions</div>
             <div class="rich-text">${nl2br(terms)}</div>
+          </div>
+        `
+      : ""
+    }
+
+      ${paymentInfo
+      ? `
+          <div class="text-block">
+            <div class="section-title">Payment Info</div>
+            <div class="rich-text">${nl2br(paymentInfo)}</div>
           </div>
         `
       : ""

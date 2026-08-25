@@ -5,6 +5,7 @@ const quotationConfigSchema = new mongoose.Schema({
     website: { type: String },
     terms: { type: String },
     prerequisites: { type: String },
+    paymentInfo: { type: String },
     additionalCosts: {
         installation: { type: Number, default: 0 },
         transport: { type: Number, default: 0 },
