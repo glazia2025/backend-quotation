@@ -2437,6 +2437,7 @@ const generateQuotationPdfController = async (req, res) => {
     res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     res.setHeader("Content-Length", pdfBuffer.length);
     res.setHeader("X-PDF-Cache", cacheStatus);
+    res.setHeader("X-PDF-Bytes", String(pdfBuffer.length));
 
     return res.end(pdfBuffer);
   } catch (error) {

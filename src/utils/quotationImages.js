@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const sharp = require("sharp");
 const {
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -14,6 +15,14 @@ const UPLOAD_CONCURRENCY = Math.max(
 );
 const QUOTATION_S3_BUCKET =
   process.env.QUOTATION_S3_BUCKET || "quotation-img";
+const PDF_IMAGE_MAX_DIMENSION = Math.max(
+  320,
+  Number(process.env.QUOTATION_PDF_IMAGE_MAX_DIMENSION || 1200)
+);
+const PDF_IMAGE_JPEG_QUALITY = Math.min(
+  100,
+  Math.max(40, Number(process.env.QUOTATION_PDF_IMAGE_JPEG_QUALITY || 78))
+);
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -89,7 +98,7 @@ const isMissingS3ObjectError = (error) =>
   error?.code === "NoSuchKey" ||
   error?.$metadata?.httpStatusCode === 404;
 
-const s3ImageToDataUrl = async (value) => {
+const s3ImageToDataUrl = async (value, { optimizeForPdf = false } = {}) => {
   const key = publicUrlToKey(value);
   if (!key) return value || "";
 
@@ -100,11 +109,29 @@ const s3ImageToDataUrl = async (value) => {
       Key: key,
     })
   );
-  const body = Buffer.from(await response.Body.transformToByteArray());
+  let body = Buffer.from(await response.Body.transformToByteArray());
   if (!body.length) {
     throw new Error(`Quotation image ${key} is empty`);
   }
-  const contentType = response.ContentType || "image/png";
+  let contentType = response.ContentType || "image/png";
+  if (optimizeForPdf && contentType !== "image/svg+xml") {
+    try {
+      body = await sharp(body, { failOn: "none" })
+        .rotate()
+        .resize({
+          width: PDF_IMAGE_MAX_DIMENSION,
+          height: PDF_IMAGE_MAX_DIMENSION,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .flatten({ background: "#ffffff" })
+        .jpeg({ quality: PDF_IMAGE_JPEG_QUALITY, mozjpeg: true })
+        .toBuffer();
+      contentType = "image/jpeg";
+    } catch (error) {
+      console.warn("Unable to optimize quotation image for PDF; using original:", error.message);
+    }
+  }
   return `data:${contentType};base64,${body.toString("base64")}`;
 };
 
@@ -141,7 +168,7 @@ async function inlineQuotationImages(quotation = {}) {
   (nextQuotation.items || []).forEach((item) => {
     if (item?.refImage) {
       tasks.push(
-        s3ImageToDataUrl(item.refImage).then((value) => {
+        s3ImageToDataUrl(item.refImage, { optimizeForPdf: true }).then((value) => {
           item.refImage = value;
         })
       );
@@ -149,7 +176,7 @@ async function inlineQuotationImages(quotation = {}) {
     (item?.subItems || []).forEach((subItem) => {
       if (!subItem?.refImage) return;
       tasks.push(
-        s3ImageToDataUrl(subItem.refImage).then((value) => {
+        s3ImageToDataUrl(subItem.refImage, { optimizeForPdf: true }).then((value) => {
           subItem.refImage = value;
         })
       );
