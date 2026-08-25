@@ -437,10 +437,22 @@ const createQuotation = async (req, res) => {
   }
 };
 const listQuotations = async (req, res) => {
-  const { systemType, series, description, page = 1, limit = 20 } = req.query;
+  const { systemType, series, description, page = 1, limit = 20, search = "" } = req.query;
 
   const filter = {};
   if (req.user?.role !== "admin") filter.user = req.user?.userId;
+  if (search.trim()) {
+  const searchRegex = new RegExp(search.trim(), "i");
+
+  filter.$and = [
+    {
+      $or: [
+        { generatedId: searchRegex },
+        { "customerDetails.name": searchRegex },
+      ],
+    },
+  ];
+}
 
   const pageNum = Math.max(parseInt(page, 10) || 1, 1);
   const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);

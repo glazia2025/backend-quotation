@@ -17,7 +17,7 @@ export const getChartData=async(req,res)=>{
             $gte: startDate,
             $lt: endDate
           },
-           "quotationDetails.opportunity": { $ne: "" }
+          //  "quotationDetails.opportunity": { $ne: "" }
         }
       },
       {
@@ -25,19 +25,44 @@ export const getChartData=async(req,res)=>{
           monthNumber: {
             $month: { $toDate: "$quotationDetails.date" }
           },
-         stage: {
+//          stage: {
+//   $cond: {
+//     if: { $ne: ["$quotationDetails.opportunity", ""] },
+//     then: {
+//       $replaceAll: {
+//         input: { $toLower: "$quotationDetails.opportunity" },
+//         find: " ",
+//         replacement: "_"
+//       }
+//     },
+//     else: "unknown"
+//   }
+// }
+            stage: {
   $cond: {
-    if: { $ne: ["$quotationDetails.opportunity", ""] },
-    then: {
+    if: {
+      $eq: [
+        { $trim: { input: "$quotationDetails.opportunity" } },
+        ""
+      ]
+    },
+    then: "enquiry",
+    else: {
       $replaceAll: {
-        input: { $toLower: "$quotationDetails.opportunity" },
+        input: {
+          $toLower: {
+            $trim: {
+              input: "$quotationDetails.opportunity"
+            }
+          }
+        },
         find: " ",
         replacement: "_"
       }
-    },
-    else: "unknown"
+    }
   }
 }
+
         }
       },
       {
@@ -80,6 +105,8 @@ export const getChartData=async(req,res)=>{
 
     }
 };
+
+
 export const getDashboardStats = async (req, res) => {
   try {
     const userId = req.params.userId;
@@ -136,3 +163,103 @@ export const getDashboardStats = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+export const getSalesPerMonth = async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const year = req.query.year;
+
+    const startDate = new Date(`${year}-01-01`);
+    const endDate = new Date(`${Number(year) + 1}-01-01`);
+
+    const data = await Quotation.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(userId),
+          $expr: {
+            $and: [
+              {
+                $gte: [
+                  { $toDate: "$quotationDetails.date" },
+                  startDate
+                ]
+              },
+              {
+                $lt: [
+                  { $toDate: "$quotationDetails.date" },
+                  endDate
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        $project: {
+          monthNumber: {
+            $month: {
+              $toDate: "$quotationDetails.date"
+            }
+          },
+          totalAmount: {
+            $ifNull: ["$breakdown.totalAmount", 0]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$monthNumber",
+          totalSales: {
+            $sum: "$totalAmount"
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          monthNumber: "$_id",
+          totalSales: 1
+        }
+      },
+      {
+        $sort: {
+          monthNumber: 1
+        }
+      }
+    ]);
+
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec"
+    ];
+
+    const result = months.map((month, index) => {
+      const found = data.find(
+        (item) => item.monthNumber === index + 1
+      );
+
+      return {
+        month,
+        sales: found?.totalSales || 0
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({
+      error: err.message
+    });
+  }
+};
+
