@@ -12,7 +12,7 @@ const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const { extractAuthToken } = require("../utils/authCookies");
 const { verifyJwt } = require("../utils/jwt");
 const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
-const { getOrGeneratePdf } = require("../utils/pdfCache");
+const { getOrGeneratePdf, preparePdfDelivery } = require("../utils/pdfCache");
 const {
   cancelPdfGeneration,
   scheduleQuotationPdfWarmup,
@@ -2459,6 +2459,65 @@ const generateQuotationPdfController = async (req, res) => {
   }
 };
 
+const prepareQuotationPdfController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: "Quotation id is required." });
+
+    const query = mongoose.Types.ObjectId.isValid(id)
+      ? { $or: [{ _id: id }, { generatedId: id }] }
+      : { generatedId: id };
+    const quotation = await Quotation.findOne(query).lean();
+    if (!quotation) return res.status(404).json({ message: "Quotation not found." });
+
+    if (
+      req.user?.role !== "admin" &&
+      quotation.user &&
+      req.user?.userId &&
+      quotation.user.toString() !== req.user.userId
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const quotationNumber = safeString(quotation.quotationDetails?.id) ||
+      safeString(quotation.generatedId) ||
+      "quotation";
+    const sanitizeFileNamePart = (value) => String(value || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const safeQuotationNumber = sanitizeFileNamePart(quotationNumber) || "quotation";
+    const customerName = sanitizeFileNamePart(quotation.customerDetails?.name);
+    const fileName = `${safeQuotationNumber}${customerName ? `_${customerName}` : ""}.pdf`;
+
+    const delivery = await preparePdfDelivery({
+      quotation,
+      type: "quotation",
+      fileName,
+      generate: async () => {
+        const [hydrated, user] = await Promise.all([
+          hydrateQuotationItems(quotation),
+          User.findById(req.user.userId),
+        ]);
+        return renderQuotationPdfBuffer(hydrated, user);
+      },
+    });
+
+    if (!delivery) {
+      return res.json({ delivery: "blob", fileName });
+    }
+
+    res.setHeader("X-PDF-Cache", delivery.cacheStatus);
+    return res.json({ delivery: "signed-url", fileName, ...delivery });
+  } catch (error) {
+    console.error("prepareQuotationPdfController error:", error);
+    return res.status(500).json({
+      message: "Failed to prepare quotation PDF.",
+      error: error.message,
+    });
+  }
+};
+
 //For Excel
 const exportQuotationExcel = async (req, res) => {
   try {
@@ -2666,6 +2725,7 @@ module.exports = {
   deleteQuotationById,
   duplicateQuotationById,
   generateQuotationPdfController,
+  prepareQuotationPdfController,
   renderQuotationPdfBuffer,
   generateElevationPdfController,
   exportQuotationExcel,

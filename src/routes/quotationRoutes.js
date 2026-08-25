@@ -20,6 +20,7 @@ const {
   deleteQuotationById,
   duplicateQuotationById,
   generateQuotationPdfController,
+  prepareQuotationPdfController,
    generateElevationPdfController,
    exportQuotationExcel,
    importQuotationExcel
@@ -80,6 +81,7 @@ router.post("/:id", isUser, updateQuotationById);
 router.delete("/:id", isUser, deleteQuotationById);
 router.post("/:id/duplicate", isUser, duplicateQuotationById);
 router.get("/:id/pdf", isUser, generateQuotationPdfController);
+router.get("/:id/pdf-url", isUser, prepareQuotationPdfController);
 router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
 router.get("/:id/export-excel", isUser, exportQuotationExcel);
 router.get("/:id/bom", isUser, generateBomPdf);

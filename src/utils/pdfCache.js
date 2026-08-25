@@ -1,8 +1,10 @@
 const {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { isLocalPdfMode } = require("./pdfRuntime");
 
 const BUCKET = process.env.QUOTATION_S3_BUCKET || "quotation-img";
@@ -21,6 +23,10 @@ let activeGenerations = 0;
 const GENERATION_CONCURRENCY = Math.max(
   1,
   Number(process.env.QUOTATION_PDF_GENERATION_CONCURRENCY || 2)
+);
+const SIGNED_URL_TTL_SECONDS = Math.max(
+  60,
+  Number(process.env.QUOTATION_PDF_SIGNED_URL_TTL_SECONDS || 900)
 );
 
 const s3Client = new S3Client({
@@ -172,6 +178,59 @@ async function getOrGeneratePdf({ quotation, type, generate }) {
   return { buffer: await inFlight.get(flightKey), cacheStatus: "MISS" };
 }
 
+async function hasStoredCachedPdf(quotation, type) {
+  if (!process.env.AWS_REGION || isLocalPdfMode()) return false;
+  try {
+    const response = await s3Client.send(
+      new HeadObjectCommand({ Bucket: BUCKET, Key: cacheKeyFor(quotation._id, type) })
+    );
+    return response.Metadata?.revision === revisionFor(quotation);
+  } catch (error) {
+    if (error?.name === "NotFound" || error?.$metadata?.httpStatusCode === 404) return false;
+    console.warn(`PDF cache metadata read failed for ${type}:`, error.message);
+    return false;
+  }
+}
+
+async function createPdfDeliveryUrls(quotation, type, fileName) {
+  if (!(await hasStoredCachedPdf(quotation, type))) return null;
+  const key = cacheKeyFor(quotation._id, type);
+  const safeFileName = String(fileName || "quotation.pdf").replace(/["\r\n]/g, "_");
+  const [previewUrl, downloadUrl] = await Promise.all([
+    getSignedUrl(
+      s3Client,
+      new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ResponseContentType: "application/pdf",
+        ResponseContentDisposition: `inline; filename="${safeFileName}"`,
+      }),
+      { expiresIn: SIGNED_URL_TTL_SECONDS }
+    ),
+    getSignedUrl(
+      s3Client,
+      new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ResponseContentType: "application/pdf",
+        ResponseContentDisposition: `attachment; filename="${safeFileName}"`,
+      }),
+      { expiresIn: SIGNED_URL_TTL_SECONDS }
+    ),
+  ]);
+  return { previewUrl, downloadUrl, expiresIn: SIGNED_URL_TTL_SECONDS };
+}
+
+async function preparePdfDelivery({ quotation, type, fileName, generate }) {
+  const wasCached = await hasStoredCachedPdf(quotation, type);
+  if (!wasCached) {
+    await getOrGeneratePdf({ quotation, type, generate });
+  }
+  const urls = await createPdfDeliveryUrls(quotation, type, fileName);
+  return urls ? { ...urls, cacheStatus: wasCached ? "HIT" : "MISS" } : null;
+}
+
 module.exports = {
   getOrGeneratePdf,
+  preparePdfDelivery,
 };
