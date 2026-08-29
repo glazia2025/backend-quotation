@@ -192,6 +192,22 @@ async function hasStoredCachedPdf(quotation, type) {
   }
 }
 
+async function getPdfCacheStatus(quotation, type) {
+  if (!process.env.AWS_REGION || isLocalPdfMode()) return { ready: false, size: 0 };
+  try {
+    const response = await s3Client.send(
+      new HeadObjectCommand({ Bucket: BUCKET, Key: cacheKeyFor(quotation._id, type) })
+    );
+    const ready = response.Metadata?.revision === revisionFor(quotation);
+    return { ready, size: ready ? Number(response.ContentLength || 0) : 0 };
+  } catch (error) {
+    if (error?.name === "NotFound" || error?.$metadata?.httpStatusCode === 404) {
+      return { ready: false, size: 0 };
+    }
+    throw error;
+  }
+}
+
 async function createPdfDeliveryUrls(quotation, type, fileName) {
   if (!(await hasStoredCachedPdf(quotation, type))) return null;
   const key = cacheKeyFor(quotation._id, type);
@@ -231,6 +247,8 @@ async function preparePdfDelivery({ quotation, type, fileName, generate }) {
 }
 
 module.exports = {
+  getPdfCacheStatus,
   getOrGeneratePdf,
   preparePdfDelivery,
+  revisionFor,
 };

@@ -8,6 +8,7 @@ const User = require("../models/User");
 const { getOrGeneratePdf } = require("./pdfCache");
 const { isLocalPdfMode } = require("./pdfRuntime");
 const { hydrateQuotationItems } = require("./quotationItems");
+const { dispatchPendingPdfJobs, isSqsPdfQueueEnabled } = require("./pdfQueue");
 
 function readDurationMs(name, fallback, { allowZero = false } = {}) {
   const rawValue = process.env[name];
@@ -37,6 +38,7 @@ let workerInterval = null;
 let leaseInterval = null;
 let tickRunning = false;
 let isLeader = false;
+let dispatcherInterval = null;
 
 const revisionFor = (quotation) =>
   String(new Date(quotation.updatedAt || quotation.createdAt || 0).getTime());
@@ -53,33 +55,49 @@ async function enqueuePdfGeneration(quotationId, userId) {
   const userObjectId = mongoose.Types.ObjectId.isValid(userId)
     ? new mongoose.Types.ObjectId(userId)
     : null;
-  await PdfGenerationJob.findOneAndUpdate(
-    { quotation: quotation._id },
-    [
+  if (isSqsPdfQueueEnabled()) {
+    await PdfGenerationJob.findOneAndUpdate(
+      { quotation: quotation._id },
       {
         $set: {
           quotation: quotation._id,
           user: userObjectId,
           revision,
-          status: {
-            $cond: [{ $eq: ["$status", "processing"] }, "processing", "pending"],
-          },
-          rerunRequested: {
-            $cond: [{ $eq: ["$status", "processing"] }, true, false],
-          },
-          attempts: { $ifNull: ["$attempts", 0] },
+          status: "pending",
+          rerunRequested: false,
           nextAttemptAt: now,
-          createdAt: { $ifNull: ["$createdAt", now] },
-          updatedAt: now,
         },
+        $setOnInsert: { attempts: 0 },
+        $unset: { lockedAt: 1, lockedBy: 1, lastError: 1, dispatchedAt: 1, messageId: 1 },
       },
-    ],
+      { upsert: true, new: true }
+    );
+    await dispatchPendingPdfJobs(1);
+    return;
+  }
+  await PdfGenerationJob.findOneAndUpdate(
+    { quotation: quotation._id },
+    [{ $set: {
+      quotation: quotation._id,
+      user: userObjectId,
+      revision,
+      status: { $cond: [{ $eq: ["$status", "processing"] }, "processing", "pending"] },
+      rerunRequested: { $cond: [{ $eq: ["$status", "processing"] }, true, false] },
+      attempts: { $ifNull: ["$attempts", 0] },
+      nextAttemptAt: now,
+      createdAt: { $ifNull: ["$createdAt", now] },
+      updatedAt: now,
+    } }],
     { upsert: true, new: true }
   );
 }
 
-function scheduleQuotationPdfWarmup(quotationId, userId) {
+async function scheduleQuotationPdfWarmup(quotationId, userId) {
   if (!WARMUP_ENABLED || isLocalPdfMode()) return;
+
+  if (isSqsPdfQueueEnabled()) {
+    return enqueuePdfGeneration(quotationId, userId);
+  }
 
   const id = String(quotationId);
   const existing = timers.get(id);
@@ -273,8 +291,20 @@ async function startPdfGenerationWorker() {
     );
     return;
   }
-  if (workerInterval) return;
-  await Promise.all([PdfGenerationJob.init(), PdfWorkerLease.init()]);
+  if (workerInterval || dispatcherInterval) return;
+  await PdfGenerationJob.init();
+  if (isSqsPdfQueueEnabled()) {
+    dispatcherInterval = setInterval(() => {
+      dispatchPendingPdfJobs().catch((error) => {
+        console.warn("PDF SQS dispatcher error:", error.message);
+      });
+    }, POLL_MS);
+    dispatcherInterval.unref?.();
+    await dispatchPendingPdfJobs();
+    console.log("Quotation PDF SQS dispatcher started");
+    return;
+  }
+  await PdfWorkerLease.init();
   await acquireOrRenewLease();
   leaseInterval = setInterval(acquireOrRenewLease, Math.max(5000, LEASE_MS / 3));
   workerInterval = setInterval(workerTick, POLL_MS);
@@ -285,6 +315,8 @@ async function startPdfGenerationWorker() {
 
 async function stopPdfGenerationWorker() {
   if (isLocalPdfMode()) return;
+  if (dispatcherInterval) clearInterval(dispatcherInterval);
+  dispatcherInterval = null;
   if (workerInterval) clearInterval(workerInterval);
   if (leaseInterval) clearInterval(leaseInterval);
   workerInterval = null;

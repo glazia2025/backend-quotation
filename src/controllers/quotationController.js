@@ -12,7 +12,7 @@ const UserOptionSet = require("../models/Quotation/UserOptionSet");
 const { extractAuthToken } = require("../utils/authCookies");
 const { verifyJwt } = require("../utils/jwt");
 const { closePdfBrowser, launchPdfBrowser, setPdfContent } = require("../utils/pdfBrowser");
-const { getOrGeneratePdf, preparePdfDelivery } = require("../utils/pdfCache");
+const { getOrGeneratePdf, getPdfCacheStatus, preparePdfDelivery, revisionFor } = require("../utils/pdfCache");
 const {
   cancelPdfGeneration,
   scheduleQuotationPdfWarmup,
@@ -420,7 +420,7 @@ const createQuotation = async (req, res) => {
     await quotation.save();
 
     const hydratedQuotation = await hydrateQuotationItems(quotation.toObject());
-    scheduleQuotationPdfWarmup(quotation._id, req.user?.userId);
+    await scheduleQuotationPdfWarmup(quotation._id, req.user?.userId);
     res.status(201).json({ quotation: hydratedQuotation });
   } catch (error) {
     if (quotation?._id) {
@@ -623,7 +623,7 @@ const updateQuotationById = async (req, res) => {
       console.warn(`Failed to remove replaced quotation images:`, error.message);
     });
 
-    scheduleQuotationPdfWarmup(quotation._id, req.user?.userId);
+    await scheduleQuotationPdfWarmup(quotation._id, req.user?.userId);
     res.json({ updatedQuotation: hydratedUpdatedQuotation });
   } catch (error) {
     console.error("Error updating quotation:", error);
@@ -723,7 +723,7 @@ const duplicateQuotationById = async (req, res) => {
       newQuotation.toObject()
     );
 
-    scheduleQuotationPdfWarmup(
+    await scheduleQuotationPdfWarmup(
       newQuotation._id,
       req.user?.userId
     );
@@ -2518,6 +2518,35 @@ const prepareQuotationPdfController = async (req, res) => {
   }
 };
 
+const getQuotationPdfStatusController = async (req, res) => {
+  try {
+    const quotation = await Quotation.findById(req.params.id).lean();
+    if (!quotation) return res.status(404).json({ message: "Quotation not found." });
+    if (
+      req.user?.role !== "admin" && quotation.user && req.user?.userId &&
+      quotation.user.toString() !== req.user.userId
+    ) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const cached = await getPdfCacheStatus(quotation, "quotation");
+    const job = cached.ready
+      ? null
+      : await require("../models/Quotation/PdfGenerationJob").findOne({ quotation: quotation._id }).lean();
+    if (!cached.ready && !job) await scheduleQuotationPdfWarmup(quotation._id, req.user?.userId);
+
+    return res.json({
+      status: cached.ready ? "ready" : job?.status || "queued",
+      revision: revisionFor(quotation),
+      size: cached.size,
+      error: job?.status === "failed" ? job.lastError : undefined,
+    });
+  } catch (error) {
+    console.error("getQuotationPdfStatusController error:", error);
+    return res.status(500).json({ message: "Failed to read PDF status." });
+  }
+};
+
 //For Excel
 const exportQuotationExcel = async (req, res) => {
   try {
@@ -2726,6 +2755,7 @@ module.exports = {
   duplicateQuotationById,
   generateQuotationPdfController,
   prepareQuotationPdfController,
+  getQuotationPdfStatusController,
   renderQuotationPdfBuffer,
   generateElevationPdfController,
   exportQuotationExcel,

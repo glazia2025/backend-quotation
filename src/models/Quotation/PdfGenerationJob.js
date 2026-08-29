@@ -13,7 +13,7 @@ const pdfGenerationJobSchema = new mongoose.Schema(
     revision: { type: String, required: true },
     status: {
       type: String,
-      enum: ["pending", "processing"],
+      enum: ["pending", "dispatched", "processing", "failed"],
       default: "pending",
       index: true,
     },
@@ -23,6 +23,8 @@ const pdfGenerationJobSchema = new mongoose.Schema(
     lockedAt: Date,
     lockedBy: String,
     lastError: String,
+    dispatchedAt: Date,
+    messageId: String,
   },
   { timestamps: true }
 );

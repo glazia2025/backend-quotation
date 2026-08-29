@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "start:pdf-worker": "node src/pdfWorker.js",
     "check": "node --check src/server.js",
     "test": "node --test src/utils/*.test.js",
     "seed:quotations": "node src/utils/seedQuotationDemo.js",
@@ -18,6 +19,7 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.761.0",
+    "@aws-sdk/client-sqs": "^3.1117.0",
     "@aws-sdk/s3-request-presigner": "^3.1117.0",
     "axios": "^1.7.9",
     "bcrypt": "^5.1.1",

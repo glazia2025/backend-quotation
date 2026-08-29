@@ -48,7 +48,7 @@ async function hydrateItem(quotation, itemId) {
 async function touchQuotation(quotation, userId) {
   quotation.markModified("quotationItems");
   await quotation.save();
-  scheduleQuotationPdfWarmup(quotation._id, userId);
+  await scheduleQuotationPdfWarmup(quotation._id, userId);
 }
 
 const createQuotationItem = async (req, res) => {

@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Durable high-volume quotation PDF queue and dead-letter queue
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+  MaxReceiveCount:
+    Type: Number
+    Default: 5
+
+Resources:
+  PdfDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub glazia-${EnvironmentName}-quotation-pdf-dlq
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  PdfQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub glazia-${EnvironmentName}-quotation-pdf
+      ReceiveMessageWaitTimeSeconds: 20
+      VisibilityTimeout: 90
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PdfDeadLetterQueue.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+Outputs:
+  PdfQueueUrl:
+    Value: !Ref PdfQueue
+  PdfQueueArn:
+    Value: !GetAtt PdfQueue.Arn
+  PdfDeadLetterQueueUrl:
+    Value: !Ref PdfDeadLetterQueue
+  PdfDeadLetterQueueArn:
+    Value: !GetAtt PdfDeadLetterQueue.Arn
