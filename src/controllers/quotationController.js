@@ -1114,11 +1114,11 @@ function getCompanyAddressBlock(data) {
 }
 
 function renderCoverPage(data, user) {
-  const companyName = escapeHtml(user.name || "Your Company");
+  const companyName = escapeHtml(user?.name || "Your Company");
   const customerName = escapeHtml(data.customerDetails.name || "Customer");
-  const companyAddress = escapeHtml(getCompanyAddressBlock(user));
-  const email = escapeHtml(user.email || "");
-  const phone = escapeHtml(user.phone || "");
+  const companyAddress = escapeHtml(getCompanyAddressBlock(user || {}));
+  const email = escapeHtml(user?.email || "");
+  const phone = escapeHtml(user?.phone || "");
   const quoteNo = escapeHtml(
     data.generatedId || data.quotationDetails.id || "Quotation"
   );
