@@ -2422,9 +2422,11 @@ const generateQuotationPdfController = async (req, res) => {
       },
     });
 
-    const quotationNumber = safeString(quotation.quotationDetails?.id) ||
-      safeString(quotation.generatedId) ||
-      "quotation";
+   
+    const quotationNumber =
+  safeString(quotation.generatedId) ||
+  safeString(quotation.quotationDetails?.id) ||
+  "quotation";
     const sanitizeFileNamePart = (value) => String(value || "")
       .trim()
       .replace(/[^a-zA-Z0-9]+/g, "_")
@@ -2479,9 +2481,11 @@ const prepareQuotationPdfController = async (req, res) => {
       return res.status(403).json({ message: "Forbidden" });
     }
 
-    const quotationNumber = safeString(quotation.quotationDetails?.id) ||
-      safeString(quotation.generatedId) ||
-      "quotation";
+   
+    const quotationNumber =
+  safeString(quotation.generatedId) ||
+  safeString(quotation.quotationDetails?.id) ||
+  "quotation";
     const sanitizeFileNamePart = (value) => String(value || "")
       .trim()
       .replace(/[^a-zA-Z0-9]+/g, "_")
