@@ -6,6 +6,7 @@ const Quotation = require("../models/Quotation/Quotation");
 const {
   isMissingS3ObjectError,
   normalizeQuotationImageUrl,
+  sanitizePdfImageReference,
   uploadQuotationImages,
 } = require("./quotationImages");
 const { hydrateQuotationItems } = require("./quotationItems");
@@ -90,6 +91,15 @@ test("missing S3 objects can be distinguished from operational S3 errors", () =>
     true
   );
   assert.equal(isMissingS3ObjectError({ name: "AccessDenied" }), false);
+});
+
+test("malformed legacy PDF image data URLs are omitted", () => {
+  assert.equal(
+    sanitizePdfImageReference("data:image/png;base64,/Quotations/Fix.png"),
+    ""
+  );
+  assert.equal(sanitizePdfImageReference("data:image/png;base64,aGVsbG8="), "data:image/png;base64,aGVsbG8=");
+  assert.equal(sanitizePdfImageReference("https://example.com/window.png"), "https://example.com/window.png");
 });
 
 test("concurrent PDF requests share one generation", async () => {

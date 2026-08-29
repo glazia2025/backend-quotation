@@ -269,10 +269,14 @@ const setPdfContent = async (page, html) => {
     );
     return images
       .filter((img) => !img.complete || img.naturalWidth === 0)
-      .map((img) => img.currentSrc || img.src || img.alt || "unknown image");
+      .map((img) => {
+        const source = img.currentSrc || img.src || img.alt || "unknown image";
+        img.remove();
+        return source;
+      });
   });
   if (failedImages.length > 0) {
-    throw new Error(`PDF image failed to load: ${failedImages.join(", ")}`);
+    console.warn(`PDF rendered without unloadable images: ${failedImages.join(", ")}`);
   }
 };
 

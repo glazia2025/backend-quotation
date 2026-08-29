@@ -98,6 +98,21 @@ const isMissingS3ObjectError = (error) =>
   error?.code === "NoSuchKey" ||
   error?.$metadata?.httpStatusCode === 404;
 
+const sanitizePdfImageReference = (value) => {
+  const source = String(value || "").trim();
+  if (!source) return "";
+  if (!/^data:/i.test(source)) return source;
+
+  const match = source.match(
+    /^data:image\/[a-zA-Z0-9.+-]+;base64,([a-zA-Z0-9+/\s]+={0,2})$/
+  );
+  if (!match) return "";
+
+  const encoded = match[1].replace(/\s/g, "");
+  if (!encoded || encoded.length % 4 !== 0) return "";
+  return source;
+};
+
 const s3ImageToDataUrl = async (value, { optimizeForPdf = false } = {}) => {
   const key = publicUrlToKey(value);
   if (!key) return value || "";
@@ -153,6 +168,11 @@ async function inlineQuotationImages(quotation = {}) {
 
   const tasks = [];
   if (nextQuotation.globalConfig?.logo) {
+    nextQuotation.globalConfig.logo = sanitizePdfImageReference(
+      nextQuotation.globalConfig.logo
+    );
+  }
+  if (nextQuotation.globalConfig?.logo) {
     tasks.push(
       s3ImageToDataUrl(nextQuotation.globalConfig.logo)
         .then((value) => {
@@ -166,19 +186,33 @@ async function inlineQuotationImages(quotation = {}) {
     );
   }
   (nextQuotation.items || []).forEach((item) => {
+    item.refImage = sanitizePdfImageReference(item?.refImage);
     if (item?.refImage) {
       tasks.push(
-        s3ImageToDataUrl(item.refImage, { optimizeForPdf: true }).then((value) => {
-          item.refImage = value;
-        })
+        s3ImageToDataUrl(item.refImage, { optimizeForPdf: true })
+          .then((value) => {
+            item.refImage = value;
+          })
+          .catch((error) => {
+            if (!isMissingS3ObjectError(error)) throw error;
+            console.warn("Quotation item image is missing from S3; rendering PDF without it");
+            item.refImage = "";
+          })
       );
     }
     (item?.subItems || []).forEach((subItem) => {
+      subItem.refImage = sanitizePdfImageReference(subItem?.refImage);
       if (!subItem?.refImage) return;
       tasks.push(
-        s3ImageToDataUrl(subItem.refImage, { optimizeForPdf: true }).then((value) => {
-          subItem.refImage = value;
-        })
+        s3ImageToDataUrl(subItem.refImage, { optimizeForPdf: true })
+          .then((value) => {
+            subItem.refImage = value;
+          })
+          .catch((error) => {
+            if (!isMissingS3ObjectError(error)) throw error;
+            console.warn("Quotation sub-item image is missing from S3; rendering PDF without it");
+            subItem.refImage = "";
+          })
       );
     });
   });
@@ -426,5 +460,6 @@ module.exports = {
   normalizeQuotationImageUrl,
   inlineQuotationImages,
   isMissingS3ObjectError,
+  sanitizePdfImageReference,
   uploadQuotationImages,
 };
