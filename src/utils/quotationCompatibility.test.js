@@ -11,6 +11,7 @@ const {
 } = require("./quotationImages");
 const { hydrateQuotationItems } = require("./quotationItems");
 const { getOrGeneratePdf } = require("./pdfCache");
+const { calculateQuotationPdfPricing } = require("./quotationPdfPricing");
 
 test("legacy embedded items and sub-items remain readable", async () => {
   const legacyImage = "data:image/png;base64,aGVsbG8=";
@@ -176,4 +177,52 @@ test("local PDF mode generates directly without using the cache", async () => {
   assert.equal(first.cacheStatus, "BYPASS");
   assert.equal(second.cacheStatus, "BYPASS");
   assert.equal(second.buffer.toString(), "local-pdf");
+});
+
+test("hiding additional costs reallocates them without changing the PDF grand total", () => {
+  const items = [{ area: 10, rate: 100, amount: 1000, quantity: 1 }];
+  const additionalCosts = {
+    installation: 10,
+    transport: 200,
+    loadingUnloading: 50,
+    discountPercent: 10,
+    showInstallation: true,
+    showTransport: true,
+    showLoadingUnloading: true,
+    showDiscount: true,
+  };
+  const visible = calculateQuotationPdfPricing(items, additionalCosts, 10);
+  const hidden = calculateQuotationPdfPricing(items, {
+    ...additionalCosts,
+    showInstallation: false,
+    showLoadingUnloading: false,
+    showDiscount: false,
+  }, 10);
+
+  assert.equal(visible.totals.totalProjectCost, 1305);
+  assert.equal(visible.totals.grandTotal, 1539.9);
+  assert.equal(hidden.totals.grandTotal, visible.totals.grandTotal);
+  assert.equal(hidden.items[0].amount, 1105);
+  assert.equal(hidden.items[0].rate, 110.5);
+});
+
+test("QUIO113 pricing includes every configured visible cost", () => {
+  const result = calculateQuotationPdfPricing(
+    [{ area: 24.22, rate: 305.84, amount: 7407.44, quantity: 1 }],
+    {
+      installation: 50,
+      transport: 2000,
+      loadingUnloading: 500,
+      discountPercent: 0,
+      showInstallation: true,
+      showTransport: true,
+      showLoadingUnloading: true,
+      showDiscount: true,
+    },
+    0
+  );
+
+  assert.equal(result.totals.installationCost, 1211);
+  assert.equal(Number(result.totals.totalProjectCost.toFixed(2)), 11118.44);
+  assert.equal(Number(result.totals.grandTotal.toFixed(2)), 13119.76);
 });

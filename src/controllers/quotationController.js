@@ -24,6 +24,7 @@ const {
   hydrateQuotationItems,
 } = require("../utils/quotationItems");
 const { calculateQuotationItemRates } = require("../services/quotationRateService");
+const { calculateQuotationPdfPricing } = require("../utils/quotationPdfPricing");
 const {
   collectQuotationImageKeys,
   deleteQuotationImages,
@@ -834,21 +835,6 @@ function computeAmount(item) {
   return Number(amount.toFixed(2));
 }
 
-function addProfit(value, profitPercentage) {
-  return Number((toNumber(value) * (1 + toNumber(profitPercentage) / 100)).toFixed(2));
-}
-
-function addProfitToItemValues(item, profitPercentage) {
-  return {
-    ...item,
-    rate: addProfit(item.rate, profitPercentage),
-    amount: addProfit(item.amount, profitPercentage),
-    subItems: Array.isArray(item.subItems)
-      ? item.subItems.map((subItem) => addProfitToItemValues(subItem, profitPercentage))
-      : [],
-  };
-}
-
 function boolToDisplay(value) {
   return value ? "Yes" : "No";
 }
@@ -942,52 +928,6 @@ function normalizeItem(item) {
   };
 }
 
-function computeTotals(items, additionalCosts = {}, profitPercentage = 0) {
-  const baseTotal = items.reduce((sum, item) => sum + toNumber(item.amount), 0);
-  const totalArea = items.reduce(
-    (sum, item) => sum + toNumber(item.area) * Math.max(1, toNumber(item.quantity, 1)),
-    0
-  );
-  const totalQty = items.reduce(
-    (sum, item) => sum + Math.max(1, toNumber(item.quantity, 1)),
-    0
-  );
-
-  const profitPercent = toNumber(profitPercentage);
-  const profitValue = (baseTotal * profitPercent) / 100;
-  const itemsSubtotal = baseTotal + profitValue;
-  const installationCost = totalArea * toNumber(additionalCosts.installation);
-  const transportCost = toNumber(additionalCosts.transport);
-  const loadingUnloadingCost = toNumber(additionalCosts.loadingUnloading);
-  const discountPercent = toNumber(additionalCosts.discountPercent);
-  const beforeDiscount =
-    itemsSubtotal + installationCost + transportCost + loadingUnloadingCost;
-  const discountValue = (beforeDiscount * discountPercent) / 100;
-  const totalProjectCost = beforeDiscount - discountValue;
-  const gstValue = totalProjectCost * 0.18;
-  const grandTotal = totalProjectCost + gstValue;
-
-  return {
-    baseTotal,
-    totalArea,
-    totalQty,
-    profitPercent,
-    profitValue,
-    itemsSubtotal,
-    installationCost,
-    transportCost,
-    loadingUnloadingCost,
-    beforeDiscount,
-    discountPercent,
-    discountValue,
-    totalProjectCost,
-    gstValue,
-    grandTotal,
-    avgWithoutGst: totalArea > 0 ? totalProjectCost / totalArea : 0,
-    avgWithGst: totalArea > 0 ? grandTotal / totalArea : 0,
-  };
-}
-
 function prepareQuotationPdfData(quotation) {
   const items = Array.isArray(quotation?.items)
     ? quotation.items.map(normalizeItem)
@@ -1049,38 +989,11 @@ function prepareQuotationPdfData(quotation) {
   };
 
   const profitPercentage = toNumber(quotation?.breakdown?.profitPercentage);
-  let totals = computeTotals(items, globalConfig.additionalCosts, profitPercentage);
-  const profitAdjustedItems = items.map((item) =>
-    addProfitToItemValues(item, profitPercentage)
+  const { items: displayedItems, totals } = calculateQuotationPdfPricing(
+    items,
+    globalConfig.additionalCosts,
+    profitPercentage
   );
-  const displayedItemsSubtotal = profitAdjustedItems.reduce(
-    (sum, item) => sum + toNumber(item.amount),
-    0
-  );
-
-  if (displayedItemsSubtotal !== totals.itemsSubtotal) {
-    const beforeDiscount =
-      displayedItemsSubtotal +
-      totals.installationCost +
-      totals.transportCost +
-      totals.loadingUnloadingCost;
-    const discountValue = (beforeDiscount * totals.discountPercent) / 100;
-    const totalProjectCost = beforeDiscount - discountValue;
-    const gstValue = totalProjectCost * 0.18;
-    const grandTotal = totalProjectCost + gstValue;
-
-    totals = {
-      ...totals,
-      itemsSubtotal: displayedItemsSubtotal,
-      beforeDiscount,
-      discountValue,
-      totalProjectCost,
-      gstValue,
-      grandTotal,
-      avgWithoutGst: totals.totalArea > 0 ? totalProjectCost / totals.totalArea : 0,
-      avgWithGst: totals.totalArea > 0 ? grandTotal / totals.totalArea : 0,
-    };
-  }
 
   return {
     generatedId: safeString(quotation?.generatedId),
@@ -1088,7 +1001,7 @@ function prepareQuotationPdfData(quotation) {
     customerDetails,
     quotationDetails,
     globalConfig,
-    items: profitAdjustedItems,
+    items: displayedItems,
     totalArea,
     breakdown: {
       totalAmount:
@@ -1403,7 +1316,7 @@ function renderSummaryPage(data) {
         </tr>
       `
     : "";
-  const discountRow = toNumber(data.totals.discountValue) > 0
+  const discountRow = additionalCosts.showDiscount && toNumber(data.totals.discountValue) > 0
     ? `
         <tr>
           <td>Discount (${formatCurrency(data.totals.discountPercent)}%)</td>
@@ -1412,9 +1325,10 @@ function renderSummaryPage(data) {
       `
     : "";
   const showItemsSubtotal =
-    additionalCosts.showInstallation ||
-    additionalCosts.showTransport ||
-    additionalCosts.showLoadingUnloading ||
+    toNumber(data.totals.profitValue) > 0 ||
+    toNumber(data.totals.installationCost) > 0 ||
+    toNumber(data.totals.transportCost) > 0 ||
+    toNumber(data.totals.loadingUnloadingCost) > 0 ||
     toNumber(data.totals.discountValue) > 0;
 
   return `

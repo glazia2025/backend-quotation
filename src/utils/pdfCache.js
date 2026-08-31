@@ -14,7 +14,7 @@ const MEMORY_CACHE_MAX_AGE_MS = Number(
 const MEMORY_CACHE_MAX_BYTES = Number(
   process.env.QUOTATION_PDF_MEMORY_CACHE_MAX_BYTES || 64 * 1024 * 1024
 );
-const PDF_CACHE_VERSION = process.env.QUOTATION_PDF_CACHE_VERSION || "7";
+const PDF_CACHE_VERSION = `${process.env.QUOTATION_PDF_CACHE_VERSION || "7"}:pricing-v2`;
 const inFlight = new Map();
 const memoryCache = new Map();
 let memoryCacheBytes = 0;
