@@ -112,8 +112,9 @@ async function createQuotationItems(quotationId, items = []) {
     });
   }
 
+  let insertedDocuments;
   try {
-    await QuotationItem.insertMany(documents);
+    insertedDocuments = await QuotationItem.insertMany(documents);
   } catch (error) {
     // An ordered batch may fail after writing an earlier document.
     await QuotationItem.deleteMany({
@@ -121,10 +122,15 @@ async function createQuotationItems(quotationId, items = []) {
     });
     throw error;
   }
-  return { topLevelIds, allIds: documents.map((document) => document._id) };
+  return {
+    topLevelIds,
+    allIds: documents.map((document) => document._id),
+    // Return persisted values, including schema defaults, casts and timestamps.
+    documents: insertedDocuments.map((document) => document.toObject()),
+  };
 }
 
-async function hydrateQuotationItems(quotation, { itemId } = {}) {
+async function hydrateQuotationItems(quotation, { itemId, documents: persistedDocuments } = {}) {
   if (!quotation) return quotation;
 
   const referenceIds = Array.isArray(quotation.quotationItems)
@@ -140,7 +146,7 @@ async function hydrateQuotationItems(quotation, { itemId } = {}) {
 
   // Item writes need only the saved parent and its children, not every item
   // in a potentially large quotation.
-  const documents = await QuotationItem.find({
+  const documents = persistedDocuments ?? await QuotationItem.find({
     quotation: quotation._id,
     ...(itemId ? { $or: [{ _id: itemId }, { parentItem: itemId }] } : {}),
   }).lean();

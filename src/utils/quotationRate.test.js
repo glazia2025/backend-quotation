@@ -128,3 +128,53 @@ test("join pricing uses only formulas matching the divider orientation", () => {
   assert.deepEqual(getJoinPricingLines(lines, "horizontal"), [lines[0]]);
   assert.deepEqual(getJoinPricingLines(lines), lines);
 });
+
+test("rate queries omit catalog images, skip joins, and keep user pricing fresh", async (t) => {
+  const mongoose = require("mongoose");
+  const { calculateQuotationItemRates } = require("../services/quotationRateService");
+  const identity = { systemType: "Casement", series: "50mm", description: "French Window" };
+  const item = { ...identity, clientId: "root", width: 1500, height: 1500, area: 24.22, cuttingScheduleKey: "45_45" };
+  const schedule = { key: "45_45", lines: [{ itemType: "profile", sapCode: "P-1", quantityFormula: "2", dimensionFormula: "W" }] };
+  const mockFind = (path, rows, expectedProjection) => {
+    const model = require(path);
+    t.mock.method(model, "find", () => {
+      const query = {
+        select(projection) { assert.equal(projection, expectedProjection); return query; },
+        lean: async () => rows,
+      };
+      return query;
+    });
+  };
+  mockFind("../models/Quotation/CuttingScheduleConfig", [{ ...identity, schedules: [schedule] }]);
+  mockFind("../models/Quotation/GlassBeadingConfig", []);
+  mockFind("../models/Quotation/HardwareLinkingConfig", []);
+  mockFind("../models/Product", [{ sapCode: "P-1", kgm: 1 }], "sapCode kgm length description -_id");
+  mockFind("../models/Hardware", [], "sapCode subCategory rate -_id");
+  t.mock.method(require("../models/Quotation/MullionCouplerConfig"), "find", () => {
+    assert.fail("A window without joins must not query mullion/coupler configuration");
+  });
+  t.mock.method(require("../models/ProfileOptions"), "aggregate", async () => [{
+    categories: { Casement: { rate: { Premium: "50" }, products: {
+      Premium: [{ sapCode: "P-1", kgm: 2, length: "6000", description: "Frame" }],
+    } } },
+  }]);
+  let adjustment = 100;
+  t.mock.method(require("../models/User"), "findById", () => ({
+    select: (projection) => {
+      assert.equal(projection, "dynamicPricing.profiles dynamicPricing.hardware -_id");
+      return { lean: async () => ({ dynamicPricing: { profiles: { "Casement - Premium": adjustment } } }) };
+    },
+  }));
+  const Nalco = mongoose.models.nalco || mongoose.model("nalco", new mongoose.Schema({ nalcoPrice: Number, date: Date }, { collection: "nalcos" }));
+  t.mock.method(Nalco, "findOne", () => ({ sort: () => ({ select: () => ({ lean: async () => ({ nalcoPrice: 250000 }) }) }) }));
+  const timings = [];
+  const [first] = await calculateQuotationItemRates({ items: [item], userId: "user", onTiming: (name, duration) => timings.push({ name, duration }) });
+  assert.equal(first.totalWeightKg, 6.04);
+  assert.equal(first.materialValue, 2114);
+  assert.equal(first.baseRate, 87.28);
+  assert.equal(timings.length, 8);
+  assert.ok(timings.every(({ duration }) => Number.isFinite(duration) && duration >= 0));
+  adjustment = 200;
+  const [second] = await calculateQuotationItemRates({ items: [item], userId: "user" });
+  assert.equal(second.materialValue, 2718);
+});

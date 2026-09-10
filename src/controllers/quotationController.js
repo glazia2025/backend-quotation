@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { performance } = require("node:perf_hooks");
 const Quotation = require("../models/Quotation/Quotation");
 const QuotationItem = require("../models/Quotation/QuotationItem");
 const User = require("../models/User");
@@ -364,13 +365,22 @@ const getOptionLists = async (req, res) => {
 };
 
 const calculateRate = async (req, res) => {
+  const started = performance.now();
+  const timings = [];
+  const setTimingHeader = () => res.setHeader("Server-Timing", [
+    ...timings,
+    `rate_total;dur=${(performance.now() - started).toFixed(1)}`,
+  ].join(", "));
   try {
     const items = await calculateQuotationItemRates({
       items: req.body?.items,
       userId: req.user?.userId,
+      onTiming: (name, duration) => timings.push(`${name};dur=${duration.toFixed(1)}`),
     });
+    setTimingHeader();
     return res.status(200).json({ items });
   } catch (error) {
+    setTimingHeader();
     return res.status(400).json({
       message: error.message || "Unable to calculate quotation rate",
     });

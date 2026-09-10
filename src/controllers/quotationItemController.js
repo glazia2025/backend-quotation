@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { performance } = require("node:perf_hooks");
 const Quotation = require("../models/Quotation/Quotation");
 const QuotationItem = require("../models/Quotation/QuotationItem");
 const {
@@ -18,12 +19,14 @@ const isOwner = (quotation, user) =>
   !user?.userId ||
   quotation.user.toString() === user.userId;
 
-async function findQuotation(req, res) {
+async function findQuotation(req, res, projection) {
   if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
     res.status(400).json({ message: "Invalid quotation id" });
     return null;
   }
-  const quotation = await Quotation.findById(req.params.id);
+  const query = Quotation.findById(req.params.id);
+  if (projection) query.select(projection);
+  const quotation = await query;
   if (!quotation) {
     res.status(404).json({ message: "Quotation not found" });
     return null;
@@ -55,29 +58,55 @@ async function touchQuotation(quotation, userId) {
 }
 
 const createQuotationItem = async (req, res) => {
+  const started = performance.now();
+  const timings = [];
+  const timed = async (name, action) => {
+    const stepStarted = performance.now();
+    try { return await action(); }
+    finally { timings.push(`${name};dur=${(performance.now() - stepStarted).toFixed(1)}`); }
+  };
+  const setTimingHeader = () => res.setHeader("Server-Timing", [
+    ...timings, `save_total;dur=${(performance.now() - started).toFixed(1)}`,
+  ].join(", "));
   let prepared;
   let createdIds = [];
   let committed = false;
   try {
-    const quotation = await findQuotation(req, res);
+    const quotation = await timed("quotation_lookup", () => findQuotation(req, res, "_id user"));
     if (!quotation) return;
     const item = req.body?.item ?? req.body;
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       return res.status(400).json({ message: "Quotation item is required" });
     }
 
-    prepared = await uploadQuotationImages({
+    prepared = await timed("image_upload", () => uploadQuotationImages({
       quotationId: quotation._id,
       items: [item],
-    });
-    const created = await createQuotationItems(quotation._id, prepared.items);
+    }));
+    const created = await timed("item_insert", () => createQuotationItems(quotation._id, prepared.items));
     createdIds = created.allIds;
-    quotation.quotationItems.push(created.topLevelIds[0]);
-    await touchQuotation(quotation, req.user?.userId);
+    // Append atomically without loading/replacing the whole item reference list.
+    const updatedQuotation = await timed("quotation_update", () => Quotation.findByIdAndUpdate(
+      quotation._id,
+      { $push: { quotationItems: created.topLevelIds[0] } },
+      { new: true, runValidators: true }
+    ).select("_id updatedAt").lean());
+    if (!updatedQuotation) {
+      const error = new Error("Quotation no longer exists");
+      error.statusCode = 404;
+      throw error;
+    }
     committed = true;
 
-    const savedItem = await hydrateItem(quotation, created.topLevelIds[0]);
-    return res.status(201).json({ item: savedItem, updatedAt: quotation.updatedAt });
+    await timed("pdf_schedule", () => scheduleQuotationPdfWarmup(quotation._id, req.user?.userId)).catch((error) => {
+      console.warn("Unable to schedule quotation PDF warmup:", error.message);
+    });
+    const hydrated = await hydrateQuotationItems({
+      _id: quotation._id,
+      quotationItems: created.topLevelIds,
+    }, { documents: created.documents });
+    setTimingHeader();
+    return res.status(201).json({ item: hydrated.items[0], updatedAt: updatedQuotation.updatedAt });
   } catch (error) {
     if (!committed && createdIds.length) {
       await QuotationItem.deleteMany({ _id: { $in: createdIds } }).catch(() => {});
@@ -85,6 +114,7 @@ const createQuotationItem = async (req, res) => {
     if (!committed) {
       await deleteS3Keys(prepared?.uploadedKeys || []).catch(() => {});
     }
+    setTimingHeader();
     console.error("Error creating quotation item:", error);
     return res.status(error.statusCode || 500).json({
       message: error.message || "Error creating quotation item",

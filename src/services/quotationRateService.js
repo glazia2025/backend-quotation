@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { performance } = require("node:perf_hooks");
 
 const CuttingScheduleConfig = require("../models/Quotation/CuttingScheduleConfig");
 const GlassBeadingConfig = require("../models/Quotation/GlassBeadingConfig");
@@ -79,8 +80,44 @@ const getLatestNalcoPrice = async () => {
     { collection: "nalcos" }
   );
   const Nalco = mongoose.models.nalco || mongoose.model("nalco", schema);
-  const latest = await Nalco.findOne({}).sort({ date: -1 }).lean();
+  const latest = await Nalco.findOne({}).sort({ date: -1 }).select("nalcoPrice -_id").lean();
   return toNumber(latest?.nalcoPrice);
+};
+
+// Map keys are dynamic; strip embedded images inside MongoDB, before transfer.
+const getProfilePricingOptions = async () => {
+  const [options] = await ProfileOptions.aggregate([
+    { $limit: 1 },
+    { $project: {
+      _id: 0,
+      categories: { $arrayToObject: { $map: {
+        input: { $objectToArray: { $ifNull: ["$categories", {}] } },
+        as: "category",
+        in: {
+          k: "$$category.k",
+          v: {
+            rate: "$$category.v.rate",
+            products: { $arrayToObject: { $map: {
+              input: { $objectToArray: { $ifNull: ["$$category.v.products", {}] } },
+              as: "option",
+              in: {
+                k: "$$option.k",
+                v: { $map: {
+                  input: { $ifNull: ["$$option.v", []] },
+                  as: "product",
+                  in: {
+                    sapCode: "$$product.sapCode", kgm: "$$product.kgm",
+                    length: "$$product.length", description: "$$product.description",
+                  },
+                } },
+              },
+            } } },
+          },
+        },
+      } } },
+    } },
+  ]);
+  return options;
 };
 
 const scheduleKeyForItem = (item = {}) => {
@@ -334,7 +371,7 @@ const calculateJoinMaterialRate = ({
   };
 };
 
-const calculateQuotationItemRates = async ({ items, userId }) => {
+const calculateQuotationItemRates = async ({ items, userId, onTiming }) => {
   const sourceItems = Array.isArray(items) ? items : [];
   if (!sourceItems.length) throw new Error("At least one item is required");
 
@@ -354,21 +391,29 @@ const calculateQuotationItemRates = async ({ items, userId }) => {
     return sourceItems.map(calculateFixedLouverRate);
   }
 
-  const configFilters = regularItems.filter((item) => !isLouverItem(item)).map(cuttingScheduleFilter);
+  const timed = async (name, load) => {
+    const started = performance.now();
+    try {
+      return await load();
+    } finally {
+      onTiming?.(name, performance.now() - started);
+    }
+  };
+  const configFilters = Array.from(new Map(regularItems
+    .filter((item) => !isLouverItem(item))
+    .map((item) => [cuttingScheduleMapKey(item), cuttingScheduleFilter(item)])).values());
   const [configs, glassBeadingConfigs, hardwareLinkingConfigs, mullionConfigs, products, hardware, profileOptions, user, nalcoPrice] = await Promise.all([
-    CuttingScheduleConfig.find({ $or: configFilters }).lean(),
-    GlassBeadingConfig.find({ $or: configFilters }).lean(),
-    HardwareLinkingConfig.find({ $or: configFilters }).lean(),
-    MullionCouplerConfig.find(
-      joinItems.length
-        ? { $or: joinItems.map((item) => ({ systemType: item.systemType, series: item.series })) }
-        : { _id: null }
-    ).lean(),
-    Product.find({ enabled: true }).lean(),
-    Hardware.find({}).lean(),
-    ProfileOptions.findOne({}).lean(),
-    userId ? User.findById(userId).select("dynamicPricing").lean() : null,
-    getLatestNalcoPrice(),
+    configFilters.length ? timed("schedules", () => CuttingScheduleConfig.find({ $or: configFilters }).lean()) : [],
+    configFilters.length ? timed("beading", () => GlassBeadingConfig.find({ $or: configFilters }).lean()) : [],
+    configFilters.length ? timed("linking", () => HardwareLinkingConfig.find({ $or: configFilters }).lean()) : [],
+    joinItems.length ? timed("joins", () => MullionCouplerConfig.find({
+      $or: joinItems.map((item) => ({ systemType: item.systemType, series: item.series })),
+    }).lean()) : [],
+    timed("products", () => Product.find({ enabled: true }).select("sapCode kgm length description -_id").lean()),
+    configFilters.length ? timed("hardware", () => Hardware.find({}).select("sapCode subCategory rate -_id").lean()) : [],
+    timed("profiles", getProfilePricingOptions),
+    userId ? timed("user_pricing", () => User.findById(userId).select("dynamicPricing.profiles dynamicPricing.hardware -_id").lean()) : null,
+    timed("nalco", getLatestNalcoPrice),
   ]);
   if (nalcoPrice <= 0) throw new Error("Latest NALCO price is unavailable");
 
