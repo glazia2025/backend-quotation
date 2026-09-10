@@ -72,7 +72,11 @@ async function enqueuePdfGeneration(quotationId, userId) {
       },
       { upsert: true, new: true }
     );
-    await dispatchPendingPdfJobs(1);
+    // The durable job is saved above. The dispatcher also polls pending jobs,
+    // so SQS latency or an outage need not delay a quotation write response.
+    void dispatchPendingPdfJobs(1).catch((error) => {
+      console.warn("Unable to dispatch PDF generation:", error.message);
+    });
     return;
   }
   await PdfGenerationJob.findOneAndUpdate(

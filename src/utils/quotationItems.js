@@ -124,11 +124,11 @@ async function createQuotationItems(quotationId, items = []) {
   return { topLevelIds, allIds: documents.map((document) => document._id) };
 }
 
-async function hydrateQuotationItems(quotation) {
+async function hydrateQuotationItems(quotation, { itemId } = {}) {
   if (!quotation) return quotation;
 
   const referenceIds = Array.isArray(quotation.quotationItems)
-    ? quotation.quotationItems.map(String)
+    ? quotation.quotationItems.map(String).filter((id) => !itemId || id === String(itemId))
     : [];
 
   if (referenceIds.length === 0) {
@@ -138,7 +138,12 @@ async function hydrateQuotationItems(quotation) {
     });
   }
 
-  const documents = await QuotationItem.find({ quotation: quotation._id }).lean();
+  // Item writes need only the saved parent and its children, not every item
+  // in a potentially large quotation.
+  const documents = await QuotationItem.find({
+    quotation: quotation._id,
+    ...(itemId ? { $or: [{ _id: itemId }, { parentItem: itemId }] } : {}),
+  }).lean();
   const byId = new Map(documents.map((document) => [String(document._id), document]));
 
   const toApiItem = (document) => {

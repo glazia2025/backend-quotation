@@ -226,3 +226,29 @@ test("QUIO113 pricing includes every configured visible cost", () => {
   assert.equal(Number(result.totals.totalProjectCost.toFixed(2)), 11118.44);
   assert.equal(Number(result.totals.grandTotal.toFixed(2)), 13119.76);
 });
+
+test("single-item hydration reads only the requested parent and children", async (t) => {
+  const QuotationItem = require("../models/Quotation/QuotationItem");
+  const quotationId = new mongoose.Types.ObjectId();
+  const parentId = new mongoose.Types.ObjectId();
+  const childId = new mongoose.Types.ObjectId();
+  const unrelatedId = new mongoose.Types.ObjectId();
+  t.mock.method(QuotationItem, "find", (filter) => {
+    assert.deepEqual(filter, {
+      quotation: quotationId,
+      $or: [{ _id: parentId }, { parentItem: parentId }],
+    });
+    return { lean: async () => [
+      { _id: parentId, quotation: quotationId, parentItem: null, refCode: "NEW", subItems: [childId], joins: [{ p1: childId, p2: "root", type: "Mullion" }] },
+      { _id: childId, quotation: quotationId, parentItem: parentId, refCode: "NEW-a", subItems: [] },
+    ] };
+  });
+  const result = await hydrateQuotationItems({
+    _id: quotationId, quotationItems: [unrelatedId, parentId],
+  }, { itemId: parentId });
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].id, String(parentId));
+  assert.equal(result.items[0].subItems[0].id, String(childId));
+  assert.equal(result.items[0].joins[0].p1, String(childId));
+  assert.equal(result.items[0].quotation, undefined);
+});

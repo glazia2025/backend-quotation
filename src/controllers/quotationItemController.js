@@ -41,14 +41,17 @@ const itemFromHydratedQuotation = (quotation, itemId) =>
   );
 
 async function hydrateItem(quotation, itemId) {
-  const hydrated = await hydrateQuotationItems(quotation.toObject());
+  const hydrated = await hydrateQuotationItems(quotation.toObject(), { itemId });
   return itemFromHydratedQuotation(hydrated, itemId);
 }
 
 async function touchQuotation(quotation, userId) {
   quotation.markModified("quotationItems");
   await quotation.save();
-  await scheduleQuotationPdfWarmup(quotation._id, userId);
+  await scheduleQuotationPdfWarmup(quotation._id, userId).catch((error) => {
+    // The item is already committed; a PDF queue outage must not roll it back.
+    console.warn("Unable to schedule quotation PDF warmup:", error.message);
+  });
 }
 
 const createQuotationItem = async (req, res) => {
