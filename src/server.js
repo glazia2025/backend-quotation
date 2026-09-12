@@ -55,7 +55,9 @@ app.use(express.json({ extended: false, limit: "50mb" }));
 const quotationRoutes = require("./routes/quotationRoutes");
 const quotationAdminRoutes = require("./routes/quotationAdminRoutes");
 const userQuotationDataRoutes = require("./routes/userQuotationDataRoutes");
+const isUser = require("./middleware/userMiddleware");
 
+app.get("/api/auth/session", isUser, (req, res) => res.json({ user: req.accessUser || null }));
 app.use("/api/quotations", quotationRoutes);
 app.use("/api/admin/quotations", quotationAdminRoutes);
 app.use("/api/user/quotation-data", userQuotationDataRoutes);

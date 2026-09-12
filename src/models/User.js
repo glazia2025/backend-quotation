@@ -11,6 +11,11 @@ const userSchema = new mongoose.Schema({
   phoneNumber: { type: String, required: true, unique: true }, // This is the primary mobile number for login
   phoneNumbers: { type: [String], default: [] }, // Additional login numbers (includes primary)
   paUrl: {type: String, required: false, default: null, unique: true},
+  disabledModules: {
+    type: [String],
+    enum: ['MAIN_SITE', 'QUOTATION_ERP'],
+    default: []
+  },
   createdAt: {
     type: Date,
     default: new Date('2026-02-03')
