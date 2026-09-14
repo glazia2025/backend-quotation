@@ -1387,14 +1387,38 @@ const buildBomData = async (quotation) => {
       `${b.type} ${b.description} ${b.itemCode}`
     )
   );
+
+  const isProfileItem = (row) => {
+    const type = String(row?.type || "").trim().toLowerCase();
+    return ["profile", "beading", "mullion", "coupler"].includes(type);
+  };
+
+  const profileRows = rows.filter(isProfileItem);
+  const hardwareRows = rows.filter((r) => !isProfileItem(r));
+
+  const profileQuantity = round3(
+    profileRows.reduce((sum, row) => sum + toNumber(row.quantity), 0)
+  );
+  const profileWeight = round3(
+    profileRows.reduce((sum, row) => sum + toNumber(row.weightKg), 0)
+  );
+  const profileSubtotal = round2(
+    profileRows.reduce((sum, row) => sum + toNumber(row.amount), 0)
+  );
+
+  const hardwareQuantity = round3(
+    hardwareRows.reduce((sum, row) => sum + toNumber(row.quantity), 0)
+  );
+  const hardwareSubtotal = round2(
+    hardwareRows.reduce((sum, row) => sum + toNumber(row.amount), 0)
+  );
+
   const totalWeight = round3(
-  rows.reduce(
-    (sum, row) => sum + toNumber(row.weightKg),
-    0
-  )
-);
-
-
+    rows.reduce(
+      (sum, row) => sum + toNumber(row.weightKg),
+      0
+    )
+  );
 
   const totals = rows.reduce(
     (acc, row) => {
@@ -1413,6 +1437,13 @@ const buildBomData = async (quotation) => {
     generatedAt: new Date(),
     nalcoPrice: pricingContext.nalcoPrice,
     rows,
+    profileRows,
+    hardwareRows,
+    profileQuantity,
+    profileWeight,
+    profileSubtotal,
+    hardwareQuantity,
+    hardwareSubtotal,
     totalWeight,
     totals,
     notes,
@@ -2022,13 +2053,11 @@ const buildPdfHtml = (data) => {
   `;
 };
 
-const renderBomRows = (rows = []) =>{
+const renderBomRows = (rows = [], emptyMessage = "No BOM items to show.") => {
   const visibleRows = rows.filter((row) => toNumber(row.quantity) > 0);
 
   return visibleRows.length
     ? visibleRows
-  // rows.length
-  //   ? rows
       .map(
         (row, index) => `
           <tr>
@@ -2046,7 +2075,7 @@ const renderBomRows = (rows = []) =>{
         `
       )
       .join("")
-    : '<tr><td colspan="8" class="empty">No BOM items to show.</td></tr>';
+    : `<tr><td colspan="8" class="empty">${escapeHtml(emptyMessage)}</td></tr>`;
 };
 
 const buildBomPdfHtml = (data) => {
@@ -2064,12 +2093,32 @@ const buildBomPdfHtml = (data) => {
   ).padStart(2, "0")}/BOM-${referenceNumber}`;
   const customer = data.customer || {};
   const destination = [customer.city, customer.state].filter(Boolean).join(", ") || "Destination";
-  const subtotal = round2(data.totals.grand);
+  const isProfileItem = (row) => {
+    const type = String(row?.type || "").trim().toLowerCase();
+    return ["profile", "beading", "mullion", "coupler"].includes(type);
+  };
+  const profileRows = data.profileRows || (data.rows || []).filter(isProfileItem);
+  const hardwareRows = data.hardwareRows || (data.rows || []).filter((r) => !isProfileItem(r));
+
+  const profileQuantity = data.profileQuantity !== undefined
+    ? data.profileQuantity
+    : round3(profileRows.reduce((sum, row) => sum + toNumber(row.quantity), 0));
+  const profileSubtotal = data.profileSubtotal !== undefined
+    ? data.profileSubtotal
+    : round2(profileRows.reduce((sum, row) => sum + toNumber(row.amount), 0));
+
+  const hardwareQuantity = data.hardwareQuantity !== undefined
+    ? data.hardwareQuantity
+    : round3(hardwareRows.reduce((sum, row) => sum + toNumber(row.quantity), 0));
+  const hardwareSubtotal = data.hardwareSubtotal !== undefined
+    ? data.hardwareSubtotal
+    : round2(hardwareRows.reduce((sum, row) => sum + toNumber(row.amount), 0));
+
+  const subtotal = round2(profileSubtotal + hardwareSubtotal);
   const gstHalf = round2(subtotal * 0.09);
   const gstTotal = round2(gstHalf * 2);
   const net = round2(subtotal + gstTotal);
   const roundedNet = Math.round(net);
-  const totalQuantity = data.rows.reduce((sum, row) => sum + toNumber(row.quantity), 0);
   const logoSrc = readAssetDataUrl("Logo.svg", "image/svg+xml");
   const upiSrc = readAssetDataUrl("upi.jpeg", "image/jpeg");
   const notesHtml = data.notes.length
@@ -2093,21 +2142,33 @@ const buildBomPdfHtml = (data) => {
           .logo-img { max-width: 160px; max-height: 54px; object-fit: contain; }
           .logo-text { font-size: 36px; font-weight: 700; letter-spacing: 2px; }
           .title { color: #d92525; font-size: 18px; font-weight: 700; letter-spacing: 0.5px; margin-top: 6px; }
+          .section-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #d92525;
+            text-transform: uppercase;
+            letter-spacing: 0.75px;
+            margin-top: 34px;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid #d92525;
+          }
           .muted { color: #404040; line-height: 1.5; font-size: 12px; }
           .tiny { font-size: 10px; margin-top: 2px; }
           .label { font-weight: 700; font-size: 12px; color: #111; }
-          .divider { border-bottom: 1px solid #b8b8b8; margin: 14px 0 18px; }
+          .divider { border-bottom: 1px solid #b8b8b8; margin: 16px 0 20px; }
           table { width: 100%; border-collapse: collapse; }
           .info-table th { text-align: left; font-size: 12px; font-weight: 700; padding: 4px 8px; }
           .info-table td { font-size: 12px; padding: 4px 8px 10px; color: #404040; }
           .info-table { margin-bottom: 6px; }
           .address-table td { width: 50%; vertical-align: top; padding: 4px 8px 10px; }
+          .products { width: 100%; margin-bottom: 28px; }
           .products thead th {
             font-size: 12px;
             font-weight: 700;
             padding: 10px 8px;
             text-align: left;
-            border-bottom: 1px solid #111;
+            border-bottom: 1.5px solid #111;
           }
           .products thead th:nth-child(1),
           .products tbody td:nth-child(1),
@@ -2121,12 +2182,20 @@ const buildBomPdfHtml = (data) => {
           .products tbody td:nth-child(8) { text-align: right; }
           .products tbody td {
             font-size: 12px;
-            padding: 10px 8px;
+            padding: 8px 8px;
             border-bottom: 1px solid #d8d8d8;
-            vertical-align: top;
+            vertical-align: middle;
           }
           .products tbody tr:last-child td { border-bottom: 1px solid #111; }
           .products tbody td:last-child { white-space: nowrap; }
+          .subtotal-row td {
+            font-weight: 700;
+            font-size: 12px;
+            padding: 10px 8px !important;
+            border-top: 1.5px solid #111 !important;
+            border-bottom: 1.5px solid #111 !important;
+            background: #fafafa;
+          }
           .totals-table td { font-size: 12px; padding: 6px 0; }
           .totals-table td:last-child { text-align: right; font-weight: 700; }
           .totals-table tr:last-child td { border-top: 1px solid #b8b8b8; padding-top: 10px; }
@@ -2201,6 +2270,7 @@ const buildBomPdfHtml = (data) => {
 
           <div class="divider"></div>
 
+          <div class="section-title" style="margin-top: 10px;">1. Aluminium Profiles</div>
           <table class="products">
             <thead>
               <tr>
@@ -2215,16 +2285,41 @@ const buildBomPdfHtml = (data) => {
               </tr>
             </thead>
             <tbody>
-              ${renderBomRows(data.rows)}
+              ${renderBomRows(profileRows, "No aluminium profiles to show.")}
+              <tr class="subtotal-row">
+                <td></td>
+                <td colspan="3" style="font-weight: 700;">Aluminium Profiles Sub Total</td>
+                <td style="text-align: center; font-weight: 700;">${round3(profileQuantity)}</td>
+                <td></td>
+                <td></td>
+                <td style="text-align: right; font-weight: 700;">${currency(profileSubtotal)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="section-title">2. Hardware</div>
+          <table class="products">
+            <thead>
               <tr>
+                <th style="width: 5%;">#</th>
+                <th style="width: 24%;">Description</th>
+                <th style="width: 15%;">Series</th>
+                <th style="width: 15%;">SAP Code</th>
+                <th style="width: 8%;">Qty.</th>
+                <th style="width: 12%;">Rate(₹)</th>
+                <th style="width: 8%;">Per</th>
+                <th style="width: 13%;">Amt. (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderBomRows(hardwareRows, "No hardware items to show.")}
+              <tr class="subtotal-row">
+                <td></td>
+                <td colspan="3" style="font-weight: 700;">Hardware Sub Total</td>
+                <td style="text-align: center; font-weight: 700;">${round3(hardwareQuantity)}</td>
                 <td></td>
                 <td></td>
-                <td></td>
-                <td style="font-weight: 700; text-align: center;">Total</td>
-                <td style="text-align: center; font-weight: 700;">${round3(totalQuantity)}</td>
-                <td></td>
-                <td></td>
-                <td style="text-align: right; font-weight: 700;">${currency(subtotal)}</td>
+                <td style="text-align: right; font-weight: 700;">${currency(hardwareSubtotal)}</td>
               </tr>
             </tbody>
           </table>
@@ -2250,24 +2345,32 @@ const buildBomPdfHtml = (data) => {
                 <div class="label">NALCO Price Used</div>
                 <div class="muted">${currency(toNumber(data.nalcoPrice) / 1000)} / Kg</div>
               </div>
-               <div style="margin-top: 12px;">
-  <div class="label">Total Weight of BOM</div>
-  <div class="muted">${round3(data.totalWeight)} Kg</div>
-</div>
+              <div style="margin-top: 12px;">
+                <div class="label">Total Weight of BOM</div>
+                <div class="muted">${round3(data.totalWeight)} Kg</div>
+              </div>
             </div>
           
             <div>
               <table class="totals-table">
                 <tr>
+                  <td class="label">Aluminium Profiles Sub Total</td>
+                  <td>${currency(profileSubtotal)}</td>
+                </tr>
+                <tr>
+                  <td class="label">Hardware Sub Total</td>
+                  <td>${currency(hardwareSubtotal)}</td>
+                </tr>
+                <tr style="border-top: 1px dashed #b8b8b8;">
                   <td class="label">Sub Total</td>
                   <td>${currency(subtotal)}</td>
                 </tr>
                 <tr>
-                  <td class="label">SGST@9%</td>
+                  <td class="label">SGST @ 9%</td>
                   <td>${currency(gstHalf)}</td>
                 </tr>
                 <tr>
-                  <td class="label">CGST@9%</td>
+                  <td class="label">CGST @ 9%</td>
                   <td>${currency(gstHalf)}</td>
                 </tr>
                 <tr>
@@ -2520,6 +2623,14 @@ const getBomData = async (req, res) => {
       projectCode: data.projectCode,
       customer: data.customer,
       rows: data.rows,
+      profileRows: data.profileRows,
+      hardwareRows: data.hardwareRows,
+      profileQuantity: data.profileQuantity,
+      profileWeight: data.profileWeight,
+      profileSubtotal: data.profileSubtotal,
+      hardwareQuantity: data.hardwareQuantity,
+      hardwareSubtotal: data.hardwareSubtotal,
+      totalWeight: data.totalWeight,
       totals: data.totals,
       notes: data.notes,
     });
