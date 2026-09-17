@@ -448,10 +448,28 @@ const createQuotation = async (req, res) => {
   }
 };
 const listQuotations = async (req, res) => {
-  const { systemType, series, description, page = 1, limit = 20, search = "" } = req.query;
+  const { systemType, series, description, page = 1, limit = 20, search = "", userId: queryUserId } = req.query;
+
+  // Production security: regular users are strictly scoped to their authenticated token userId.
+  // Admins can view all quotations or pass ?userId= to filter by a specific user.
+  const targetUserId = req.user?.role === "admin"
+    ? (queryUserId || null)
+    : (req.user?.userId || null);
 
   const filter = {};
-  if (req.user?.role !== "admin") filter.user = req.user?.userId;
+  if (targetUserId) {
+    if (mongoose.Types.ObjectId.isValid(targetUserId)) {
+      filter.user = new mongoose.Types.ObjectId(targetUserId);
+    } else {
+      filter.user = targetUserId;
+    }
+  } else if (req.user?.role !== "admin") {
+    // Failsafe: non-admin without userId gets no records
+    filter.user = null;
+  }
+
+
+
   if (search.trim()) {
   const searchRegex = new RegExp(search.trim(), "i");
 
