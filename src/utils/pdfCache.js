@@ -29,15 +29,27 @@ const SIGNED_URL_TTL_SECONDS = Math.max(
   Number(process.env.QUOTATION_PDF_SIGNED_URL_TTL_SECONDS || 900)
 );
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials:
-    process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-      ? {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        }
-      : undefined,
+let _s3Client = null;
+const getS3Client = () => {
+  if (!_s3Client) {
+    _s3Client = new S3Client({
+      region: process.env.AWS_REGION || "eu-north-1",
+      credentials:
+        process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+          ? {
+              accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+            }
+          : undefined,
+    });
+  }
+  return _s3Client;
+};
+
+const s3Client = new Proxy({}, {
+  get(target, prop) {
+    return getS3Client()[prop];
+  }
 });
 
 const revisionFor = (quotation) =>
