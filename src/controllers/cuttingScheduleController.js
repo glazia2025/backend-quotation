@@ -2623,6 +2623,7 @@ const getBomData = async (req, res) => {
 
     const data = await buildBomData(quotation);
     return res.status(200).json({
+      quotationId: String(quotation._id),
       project: data.project,
       projectCode: data.projectCode,
       customer: data.customer,
