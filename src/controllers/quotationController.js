@@ -1,5 +1,29 @@
+const fs = require("fs");
+const path = require("path");
 const mongoose = require("mongoose");
 const { performance } = require("node:perf_hooks");
+
+let cachedGlaziaLogo = null;
+function getGlaziaLogoDataUrl() {
+  if (cachedGlaziaLogo !== null) return cachedGlaziaLogo;
+  try {
+    const candidatePaths = [
+      path.resolve(__dirname, "../assets/glazia-new-logo.jpeg"),
+      path.resolve(__dirname, "../../glazia-quotation/public/images/glazia-new-logo.jpeg"),
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        const buffer = fs.readFileSync(p);
+        cachedGlaziaLogo = `data:image/jpeg;base64,${buffer.toString("base64")}`;
+        return cachedGlaziaLogo;
+      }
+    }
+  } catch (err) {
+    console.warn("Could not load Glazia logo:", err.message);
+  }
+  cachedGlaziaLogo = "";
+  return cachedGlaziaLogo;
+}
 const Quotation = require("../models/Quotation/Quotation");
 const QuotationItem = require("../models/Quotation/QuotationItem");
 const User = require("../models/User");
@@ -321,6 +345,31 @@ const getOptionLists = async (req, res) => {
 
     console.log('userOptionMap', userOptionMap);
 
+    const defaultColorForFinish = (name) => {
+      const lower = String(name || "").toLowerCase();
+      if (lower.includes("champagne")) return "#C5A059";
+      if (lower.includes("bronze")) return "#5B4033";
+      if (lower.includes("black")) return "#1E232A";
+      if (lower.includes("white")) return "#ECEFF1";
+      if (lower.includes("wenge")) return "#3B2618";
+      if (lower.includes("teak") || lower.includes("wood")) return "#6D4C41";
+      if (lower.includes("walnut")) return "#4E342E";
+      if (lower.includes("oak")) return "#A17238";
+      if (lower.includes("silver") || lower.includes("natural")) return "#9CA3AF";
+      if (lower.includes("grey") || lower.includes("gray")) {
+        if (lower.includes("2200")) return "#64748B";
+        if (lower.includes("2900")) return "#475569";
+        if (lower.includes("dark") || lower.includes("anthracite")) return "#374151";
+        return "#5B6777";
+      }
+      if (lower.includes("anthracite")) return "#2E3440";
+      if (lower.includes("ivory") || lower.includes("beige") || lower.includes("cream")) return "#E8D8C8";
+      if (lower.includes("charcoal")) return "#2D3748";
+      if (lower.includes("brown")) return "#4E342E";
+      if (lower.includes("gold")) return "#D4AF37";
+      return "#334155";
+    };
+
     const mergeAdminAndUserRates = (adminItems, type) => {
       const adminMap = adminItems.reduce((acc, row) => {
         acc[row.name] = numberOr(row.rate, 0);
@@ -334,7 +383,7 @@ const getOptionLists = async (req, res) => {
         rate: Object.prototype.hasOwnProperty.call(adminMap, name)
           ? effectiveRateWithAdminFallback(adminMap[name], userMap[name])
           : numberOr(userMap[name], 0),
-        color: userColors[name] || adminItems.find((item) => item.name === name)?.color || "",
+        color: userColors[name] || adminItems.find((item) => item.name === name)?.color || (type === "colorFinish" ? defaultColorForFinish(name) : ""),
       }));
     };
 
@@ -448,10 +497,28 @@ const createQuotation = async (req, res) => {
   }
 };
 const listQuotations = async (req, res) => {
-  const { systemType, series, description, page = 1, limit = 20, search = "" } = req.query;
+  const { systemType, series, description, page = 1, limit = 20, search = "", userId: queryUserId } = req.query;
+
+  // Production security: regular users are strictly scoped to their authenticated token userId.
+  // Admins can view all quotations or pass ?userId= to filter by a specific user.
+  const targetUserId = req.user?.role === "admin"
+    ? (queryUserId || null)
+    : (req.user?.userId || null);
 
   const filter = {};
-  if (req.user?.role !== "admin") filter.user = req.user?.userId;
+  if (targetUserId) {
+    if (mongoose.Types.ObjectId.isValid(targetUserId)) {
+      filter.user = new mongoose.Types.ObjectId(targetUserId);
+    } else {
+      filter.user = targetUserId;
+    }
+  } else if (req.user?.role !== "admin") {
+    // Failsafe: non-admin without userId gets no records
+    filter.user = null;
+  }
+
+
+
   if (search.trim()) {
   const searchRegex = new RegExp(search.trim(), "i");
 
@@ -1038,42 +1105,77 @@ function getCompanyAddressBlock(data) {
 
 function renderCoverPage(data, user) {
   const companyName = escapeHtml(user?.name || "Your Company");
-  const customerName = escapeHtml(data.customerDetails.name || "Customer");
+  const customerName = escapeHtml(data.customerDetails?.name || "Customer");
+  const customerAddress = escapeHtml(
+    [
+      data.customerDetails?.address,
+      data.customerDetails?.city,
+      data.customerDetails?.state,
+      data.customerDetails?.pincode,
+    ]
+      .filter(Boolean)
+      .join(", ")
+  );
+  const customerPhone = escapeHtml(data.customerDetails?.phone || "");
+  const customerEmail = escapeHtml(data.customerDetails?.email || "");
   const companyAddress = escapeHtml(getCompanyAddressBlock(user || {}));
   const email = escapeHtml(user?.email || "");
   const phone = escapeHtml(user?.phone || "");
   const quoteNo = escapeHtml(
-    data.generatedId || data.quotationDetails.id || "Quotation"
+    data.generatedId || data.quotationDetails?.id || "Quotation"
   );
-  const quoteDate = escapeHtml(data.quotationDetails.displayDate || "-");
-  const website = escapeHtml(data.globalConfig.website || "");
+  const quoteDate = escapeHtml(data.quotationDetails?.displayDate || "-");
+  const website = escapeHtml(data.globalConfig?.website || "");
 
-  const logoHtml = data.globalConfig.logo
+  const logoHtml = data.globalConfig?.logo
     ? `<img src="${data.globalConfig.logo}" alt="Logo" class="logo" />`
     : `<div class="logo-fallback">${companyName}</div>`;
+
+  const glaziaLogoSrc = getGlaziaLogoDataUrl();
+  const glaziaLogoHtml = glaziaLogoSrc
+    ? `<img src="${glaziaLogoSrc}" alt="Glazia Logo" class="glazia-logo" />`
+    : `<div class="glazia-brand-text">GLAZIA</div>`;
 
   return `
     <section class="page cover-page">
       <div class="cover-top">
-       <div>
-  ${logoHtml}
+        <div class="header-left">
+          ${logoHtml}
+          ${website
+            ? `
+            <div class="company-website">
+              <a href="${website.startsWith("http") ? website : `https://${website}`}" target="_blank">
+                ${website}
+              </a>
+            </div>
+            `
+            : ""
+          }
+        </div>
 
-  ${website
-      ? `
-      <div class="company-website">
-        <a href="${website.startsWith("http") ? website : `https://${website}`}" target="_blank">
-          ${website}
-        </a>
-      </div>
-      `
-      : ""
-    }
-</div>
-        <div class="company-block">
+        <div class="header-center">
           <div class="company-name">${companyName}</div>
-          ${companyAddress ? `<div>${companyAddress}</div>` : ""}
-          ${phone ? `<div>Contact No. : ${phone}</div>` : ""}
-          ${email ? `<div>Email : ${email}</div>` : ""}
+          ${companyAddress ? `<div class="center-sub">${companyAddress}</div>` : ""}
+          <div class="center-sub">
+            ${phone ? `<span>Contact: ${phone}</span>` : ""}
+            ${phone && email ? `<span> | </span>` : ""}
+            ${email ? `<span>Email: ${email}</span>` : ""}
+          </div>
+          <div class="center-customer-box">
+            <div class="center-customer-title">Customer: <strong>${customerName}</strong></div>
+            ${customerAddress ? `<div class="center-sub">${customerAddress}</div>` : ""}
+            ${customerPhone || customerEmail ? `
+              <div class="center-sub">
+                ${customerPhone ? `<span>Contact: ${customerPhone}</span>` : ""}
+                ${customerPhone && customerEmail ? `<span> | </span>` : ""}
+                ${customerEmail ? `<span>Email: ${customerEmail}</span>` : ""}
+              </div>
+            ` : ""}
+          </div>
+        </div>
+
+        <div class="header-right">
+          ${glaziaLogoHtml}
         </div>
       </div>
 
@@ -1580,7 +1682,81 @@ function buildPdfHtml(data, user) {
             min-height: 270mm;
           }
 
-          .cover-top,
+          .cover-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 14px;
+            width: 100%;
+          }
+
+          .header-left {
+            flex: 0 0 160px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+          }
+
+          .logo,
+          .header-logo {
+            max-width: 150px;
+            max-height: 70px;
+            object-fit: contain;
+          }
+
+          .header-center {
+            flex: 1;
+            text-align: center;
+            line-height: 1.4;
+            padding: 0 8px;
+          }
+
+          .header-center .company-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: #111;
+            margin-bottom: 2px;
+          }
+
+          .header-center .center-sub {
+            font-size: 10.5px;
+            color: #444;
+            line-height: 1.35;
+          }
+
+          .header-center .center-customer-box {
+            margin-top: 5px;
+            padding-top: 4px;
+            border-top: 1px dashed #d1d5db;
+          }
+
+          .header-center .center-customer-title {
+            font-size: 11.5px;
+            color: #111;
+          }
+
+          .header-right {
+            flex: 0 0 160px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            justify-content: center;
+          }
+
+          .header-right .glazia-logo {
+            max-width: 140px;
+            max-height: 60px;
+            object-fit: contain;
+          }
+
+          .header-right .glazia-brand-text {
+            font-size: 18px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: #ee1c25;
+          }
+
           .page-header {
             display: flex;
             justify-content: space-between;
@@ -1588,17 +1764,10 @@ function buildPdfHtml(data, user) {
             gap: 16px;
           }
 
-          .logo,
-          .header-logo {
-            max-width: 180px;
-            max-height: 70px;
-            object-fit: contain;
-          }
-
           .logo-fallback,
           .header-company,
           .company-name {
-            font-size: 20px;
+            font-size: 16px;
             font-weight: 700;
           }
 
@@ -1609,22 +1778,23 @@ function buildPdfHtml(data, user) {
             font-size: 12px;
             max-width: 320px;
           }
-           .company-website {
-  margin-top: 8px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 500;
-}
 
-.company-website a {
-  color: #2563eb;
-  text-decoration: underline;
-  cursor: pointer;
-}
+          .company-website {
+            margin-top: 6px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 500;
+          }
 
-.company-website a:hover {
-  color: #1d4ed8;
-}
+          .company-website a {
+            color: #2563eb;
+            text-decoration: underline;
+            cursor: pointer;
+          }
+
+          .company-website a:hover {
+            color: #1d4ed8;
+          }
 
           .separator {
             border-top: 2px solid #aa9f89;

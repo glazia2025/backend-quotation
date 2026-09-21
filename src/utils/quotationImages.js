@@ -24,15 +24,27 @@ const PDF_IMAGE_JPEG_QUALITY = Math.min(
   Math.max(40, Number(process.env.QUOTATION_PDF_IMAGE_JPEG_QUALITY || 78))
 );
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials:
-    process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-      ? {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        }
-      : undefined,
+let _s3Client = null;
+const getS3Client = () => {
+  if (!_s3Client) {
+    _s3Client = new S3Client({
+      region: process.env.AWS_REGION || "eu-north-1",
+      credentials:
+        process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+          ? {
+              accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+            }
+          : undefined,
+    });
+  }
+  return _s3Client;
+};
+
+const s3Client = new Proxy({}, {
+  get(target, prop) {
+    return getS3Client()[prop];
+  }
 });
 
 const extensionByMimeType = {
@@ -49,7 +61,7 @@ const extensionByMimeType = {
 const quotationImagePrefix = (quotationId) => `quotations/${quotationId}/`;
 
 const buildPublicUrl = (key) => {
-  const region = process.env.AWS_REGION;
+  const region = process.env.AWS_REGION || "eu-north-1";
   return `https://${QUOTATION_S3_BUCKET}.s3.${region}.amazonaws.com/${key}`;
 };
 
@@ -117,37 +129,42 @@ const s3ImageToDataUrl = async (value, { optimizeForPdf = false } = {}) => {
   const key = publicUrlToKey(value);
   if (!key) return value || "";
 
-  assertConfigured();
-  const response = await s3Client.send(
-    new GetObjectCommand({
-      Bucket: QUOTATION_S3_BUCKET,
-      Key: key,
-    })
-  );
-  let body = Buffer.from(await response.Body.transformToByteArray());
-  if (!body.length) {
-    throw new Error(`Quotation image ${key} is empty`);
-  }
-  let contentType = response.ContentType || "image/png";
-  if (optimizeForPdf && contentType !== "image/svg+xml") {
-    try {
-      body = await sharp(body, { failOn: "none" })
-        .rotate()
-        .resize({
-          width: PDF_IMAGE_MAX_DIMENSION,
-          height: PDF_IMAGE_MAX_DIMENSION,
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        .flatten({ background: "#ffffff" })
-        .jpeg({ quality: PDF_IMAGE_JPEG_QUALITY, mozjpeg: true })
-        .toBuffer();
-      contentType = "image/jpeg";
-    } catch (error) {
-      console.warn("Unable to optimize quotation image for PDF; using original:", error.message);
+  try {
+    assertConfigured();
+    const response = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: QUOTATION_S3_BUCKET,
+        Key: key,
+      })
+    );
+    let body = Buffer.from(await response.Body.transformToByteArray());
+    if (!body.length) {
+      throw new Error(`Quotation image ${key} is empty`);
     }
+    let contentType = response.ContentType || "image/png";
+    if (optimizeForPdf && contentType !== "image/svg+xml") {
+      try {
+        body = await sharp(body, { failOn: "none" })
+          .rotate()
+          .resize({
+            width: PDF_IMAGE_MAX_DIMENSION,
+            height: PDF_IMAGE_MAX_DIMENSION,
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .flatten({ background: "#ffffff" })
+          .jpeg({ quality: PDF_IMAGE_JPEG_QUALITY, mozjpeg: true })
+          .toBuffer();
+        contentType = "image/jpeg";
+      } catch (error) {
+        console.warn("Unable to optimize quotation image for PDF; using original:", error.message);
+      }
+    }
+    return `data:${contentType};base64,${body.toString("base64")}`;
+  } catch (err) {
+    console.warn(`Unable to fetch S3 image ${key} for PDF:`, err.message);
+    return value || "";
   }
-  return `data:${contentType};base64,${body.toString("base64")}`;
 };
 
 async function inlineQuotationImages(quotation = {}) {
@@ -272,7 +289,9 @@ const parseImage = (value) => {
 };
 
 const assertConfigured = () => {
-  if (!QUOTATION_S3_BUCKET || !process.env.AWS_REGION) {
+  const bucket = process.env.QUOTATION_S3_BUCKET || QUOTATION_S3_BUCKET || "quotation-img";
+  const region = process.env.AWS_REGION || "eu-north-1";
+  if (!bucket || !region) {
     const error = new Error("S3 is not configured for quotation images");
     error.statusCode = 500;
     throw error;
