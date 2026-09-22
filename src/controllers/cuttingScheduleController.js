@@ -1212,9 +1212,7 @@ const buildBomData = async (quotation) => {
       if (line.itemType === "hardware") {
         const product = catalogProducts.get(catalogProductKey(line));
         const rate = product
-          ? round2(toNumber(product.rate)
-          //  + getHardwareAdjustment(product, pricingContext)
-          )
+          ? round2(toNumber(product.rate) + getHardwareAdjustment(product, pricingContext))
           : 0;
         addBomRow(groups, {
           type: "Hardware",
@@ -1238,9 +1236,9 @@ const buildBomData = async (quotation) => {
       });
       linkedHardware.lines.forEach((line) => {
         const product = hardwareByCode.get(String(line.sapCode).toUpperCase());
-        const rate = product ? round2(toNumber(product.rate)
-        //  + getHardwareAdjustment(product, pricingContext)
-        ) : 0;
+        const rate = product
+          ? round2(toNumber(product.rate) + getHardwareAdjustment(product, pricingContext))
+          : 0;
         addBomRow(groups, {
           type: "Hardware", system: item.systemType, series: item.series,
           description: line.description || product?.perticular || line.sapCode,
