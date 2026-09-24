@@ -161,7 +161,7 @@ test("rate queries omit catalog images, skip joins, and keep user pricing fresh"
   let adjustment = 100;
   t.mock.method(require("../models/User"), "findById", () => ({
     select: (projection) => {
-      assert.equal(projection, "dynamicPricing.profiles dynamicPricing.hardware -_id");
+      assert.equal(projection, "dynamicPricing.profiles -_id");
       return { lean: async () => ({ dynamicPricing: { profiles: { "Casement - Premium": adjustment } } }) };
     },
   }));
@@ -177,4 +177,31 @@ test("rate queries omit catalog images, skip joins, and keep user pricing fresh"
   adjustment = 200;
   const [second] = await calculateQuotationItemRates({ items: [item], userId: "user" });
   assert.equal(second.materialValue, 2718);
+});
+
+test("scheduled and linked hardware ignore legacy user adjustments while profiles retain them", () => {
+  for (const hardwarePricing of [{}, { Locks: 0 }, { Locks: 900 }]) {
+    const result = calculateProfileMaterialBaseRate({
+      item: { width: 1000, height: 1000, area: 10, glassSpec: "6mm Clear" },
+      schedule: { lines: [
+        { itemType: "profile", sapCode: "P", quantityFormula: "2", dimensionFormula: "W" },
+        { itemType: "hardware", sapCode: "H", quantityFormula: "3" },
+      ] },
+      productsByCode: new Map([["P", { kgm: 2 }]]),
+      profileMetadataByCode: new Map([["P", { kgm: 2, categoryName: "Sliding" }]]),
+      profilePricing: { Sliding: 150 },
+      hardwareByCode: new Map([["H", { rate: 25, subCategory: "Locks" }]]),
+      hardwarePricing,
+      hardwareLinkingConfig: { shutterCount: 2, glassRules: [{
+        glassSpec: "6mm Clear", conditions: [{ operator: ">=", weightKg: 0,
+          hardware: [{ sapCode: "H", quantity: 1, applicability: "always" }],
+        }],
+      }] },
+      nalcoPrice: 250000,
+    });
+    assert.equal(result.profiles[0].ratePerKg, 400);
+    assert.deepEqual(result.otherMaterials.map(row => [row.quantity, row.unitRate, row.amount]), [[3, 25, 75], [2, 25, 50]]);
+    assert.equal(result.materialValue, 1741);
+    assert.equal(result.baseRate, 174.1);
+  }
 });

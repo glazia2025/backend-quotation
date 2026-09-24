@@ -926,7 +926,6 @@ const getUserPricingContext = async (userId) => {
   return {
     nalcoPrice,
     dynamicPricing: {
-      hardware: normalizeDynamicMap(user?.dynamicPricing?.hardware),
       profiles: normalizeDynamicMap(user?.dynamicPricing?.profiles),
     },
     glassRates: {
@@ -964,9 +963,6 @@ const getProfileRateBySapCode = (profileOption, sapCode) => {
 
   return 0;
 };
-
-const getHardwareAdjustment = (product, context) =>
-  getDynamicAdjustment(context.dynamicPricing.hardware, [product?.subCategory]);
 
 function consumeProfileLength(
   sapCode,
@@ -1212,7 +1208,7 @@ const buildBomData = async (quotation) => {
       if (line.itemType === "hardware") {
         const product = catalogProducts.get(catalogProductKey(line));
         const rate = product
-          ? round2(toNumber(product.rate) + getHardwareAdjustment(product, pricingContext))
+          ? round2(toNumber(product.rate))
           : 0;
         addBomRow(groups, {
           type: "Hardware",
@@ -1237,7 +1233,7 @@ const buildBomData = async (quotation) => {
       linkedHardware.lines.forEach((line) => {
         const product = hardwareByCode.get(String(line.sapCode).toUpperCase());
         const rate = product
-          ? round2(toNumber(product.rate) + getHardwareAdjustment(product, pricingContext))
+          ? round2(toNumber(product.rate))
           : 0;
         addBomRow(groups, {
           type: "Hardware", system: item.systemType, series: item.series,

@@ -189,7 +189,6 @@ const calculateProfileMaterialBaseRate = ({
   profileMetadataByCode,
   profilePricing,
   hardwareByCode = new Map(),
-  hardwarePricing = {},
   glassBeadingConfig,
   hardwareLinkingConfig,
   nalcoPrice,
@@ -256,9 +255,7 @@ const calculateProfileMaterialBaseRate = ({
       return;
     }
     const quantity = Math.max(0, toNumber(evaluateFormula(line.quantityFormula || "1", variables)));
-    const configured = Number(hardwarePricing[hardware.subCategory]);
-    const adjustment = Number.isFinite(configured) && configured !== 0 ? configured : DEFAULT_PROFILE_ADJUSTMENT;
-    const unitRate = round2(toNumber(hardware.rate) + adjustment);
+    const unitRate = round2(toNumber(hardware.rate));
     const amount = round2(quantity * unitRate);
     materialValue += amount;
     otherMaterials.push({ type: "Hardware", sapCode: line.sapCode, quantity, unitRate, amount });
@@ -277,9 +274,7 @@ const calculateProfileMaterialBaseRate = ({
       warnings.push(`Linked hardware ${line.sapCode || line.description || "unknown"} was not found`);
       return;
     }
-    const configured = Number(hardwarePricing[hardware.subCategory]);
-    const adjustment = Number.isFinite(configured) && configured !== 0 ? configured : DEFAULT_PROFILE_ADJUSTMENT;
-    const unitRate = round2(toNumber(hardware.rate) + adjustment);
+    const unitRate = round2(toNumber(hardware.rate));
     const amount = round2(line.quantity * unitRate);
     materialValue += amount;
     otherMaterials.push({ type: "Hardware", sapCode: line.sapCode, description: line.description, quantity: line.quantity, unitRate, amount });
@@ -412,7 +407,7 @@ const calculateQuotationItemRates = async ({ items, userId, onTiming }) => {
     timed("products", () => Product.find({ enabled: true }).select("sapCode kgm length description -_id").lean()),
     configFilters.length ? timed("hardware", () => Hardware.find({}).select("sapCode subCategory rate -_id").lean()) : [],
     timed("profiles", getProfilePricingOptions),
-    userId ? timed("user_pricing", () => User.findById(userId).select("dynamicPricing.profiles dynamicPricing.hardware -_id").lean()) : null,
+    userId ? timed("user_pricing", () => User.findById(userId).select("dynamicPricing.profiles -_id").lean()) : null,
     timed("nalco", getLatestNalcoPrice),
   ]);
   if (nalcoPrice <= 0) throw new Error("Latest NALCO price is unavailable");
@@ -427,7 +422,6 @@ const calculateQuotationItemRates = async ({ items, userId, onTiming }) => {
   ]));
   const profileMetadataByCode = buildProfileMetadataMap(profileOptions);
   const profilePricing = restoreRateMap(user?.dynamicPricing?.profiles || {});
-  const hardwarePricing = restoreRateMap(user?.dynamicPricing?.hardware || {});
   const hardwareByCode = new Map(hardware.map((row) => [String(row.sapCode || "").trim().toUpperCase(), row]));
   const glassConfigMap = new Map(glassBeadingConfigs.map((config) => [
     `${config.systemType}||${config.series}||${config.description}||${config.glassSpec}`,
@@ -477,7 +471,6 @@ const calculateQuotationItemRates = async ({ items, userId, onTiming }) => {
         profileMetadataByCode,
         profilePricing,
         hardwareByCode,
-        hardwarePricing,
         glassBeadingConfig: glassConfigMap.get(`${item.systemType}||${item.series}||${item.description}||${item.glassSpec || ""}`),
         hardwareLinkingConfig: hardwareLinkingMap.get(`${item.systemType}||${item.series}||${item.description}`),
         nalcoPrice,
