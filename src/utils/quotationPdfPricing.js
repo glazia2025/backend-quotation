@@ -62,17 +62,19 @@ function calculateQuotationPdfPricing(items, additionalCosts = {}, profitPercent
   );
   const profitPercent = toNumber(profitPercentage);
   const profitValue = (baseTotal * profitPercent) / 100;
+  const fabricationCost = totalArea * toNumber(additionalCosts.fabrication);
   const installationCost = totalArea * toNumber(additionalCosts.installation);
   const transportCost = toNumber(additionalCosts.transport);
   const loadingUnloadingCost = toNumber(additionalCosts.loadingUnloading);
   const discountPercent = toNumber(additionalCosts.discountPercent);
   const beforeDiscount =
-    baseTotal + profitValue + installationCost + transportCost + loadingUnloadingCost;
+    baseTotal + profitValue + fabricationCost + installationCost + transportCost + loadingUnloadingCost;
   const discountValue = (beforeDiscount * discountPercent) / 100;
   const totalProjectCost = beforeDiscount - discountValue;
   const gstValue = totalProjectCost * 0.18;
   const grandTotal = totalProjectCost + gstValue;
   const hiddenAdditionalCosts =
+    (additionalCosts.showFabrication ? 0 : fabricationCost) +
     (additionalCosts.showInstallation ? 0 : installationCost) +
     (additionalCosts.showTransport ? 0 : transportCost) +
     (additionalCosts.showLoadingUnloading ? 0 : loadingUnloadingCost);
@@ -94,6 +96,7 @@ function calculateQuotationPdfPricing(items, additionalCosts = {}, profitPercent
       totalQty,
       profitPercent,
       profitValue,
+      fabricationCost,
       itemsSubtotal,
       installationCost,
       transportCost,

@@ -1042,6 +1042,9 @@ function prepareQuotationPdfData(quotation) {
     prerequisites: safeString(quotation?.globalConfig?.prerequisites),
     paymentInfo: safeString(quotation?.globalConfig?.paymentInfo),
     additionalCosts: {
+      fabrication: toNumber(
+    quotation?.globalConfig?.additionalCosts?.fabrication
+  ),
       installation: toNumber(quotation?.globalConfig?.additionalCosts?.installation),
       transport: toNumber(quotation?.globalConfig?.additionalCosts?.transport),
       loadingUnloading: toNumber(
@@ -1050,6 +1053,9 @@ function prepareQuotationPdfData(quotation) {
       discountPercent: toNumber(
         quotation?.globalConfig?.additionalCosts?.discountPercent
       ),
+       showFabrication: booleanOr(
+    quotation?.globalConfig?.additionalCosts?.showFabrication
+  ),
       showInstallation: booleanOr(
         quotation?.globalConfig?.additionalCosts?.showInstallation
       ),
@@ -1403,6 +1409,14 @@ function renderItemPage(data, item, showIntro = false) {
 
 function renderSummaryPage(data) {
   const additionalCosts = data.globalConfig.additionalCosts || {};
+  const fabricationRow = additionalCosts.showFabrication
+  ? `
+      <tr>
+        <td>Fabrication</td>
+        <td>${formatCurrency(data.totals.fabricationCost)} INR</td>
+      </tr>
+    `
+  : "";
 
   const installationRow = additionalCosts.showInstallation
     ? `
@@ -1438,6 +1452,7 @@ function renderSummaryPage(data) {
     : "";
   const showItemsSubtotal =
     toNumber(data.totals.profitValue) > 0 ||
+    toNumber(data.totals.fabricationCost) > 0 ||
     toNumber(data.totals.installationCost) > 0 ||
     toNumber(data.totals.transportCost) > 0 ||
     toNumber(data.totals.loadingUnloadingCost) > 0 ||
@@ -1456,6 +1471,7 @@ function renderSummaryPage(data) {
           <td>Total Area</td>
           <td>${data.totals.totalArea.toFixed(2)} Sq.ft</td>
         </tr>
+        ${fabricationRow}
         ${installationRow}
         ${transportRow}
         ${loadingUnloadingRow}

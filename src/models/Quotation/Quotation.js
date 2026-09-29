@@ -48,6 +48,8 @@ const quotationSchema = new mongoose.Schema(
         transport: { type: Number, default: 0 },
         loadingUnloading: { type: Number, default: 0 },
         discountPercent: { type: Number, default: 0 },
+        fabrication: { type: Number, default: 0 },
+        showFabrication: { type: Boolean, default: true },
         showInstallation: { type: Boolean, default: true },
         showTransport: { type: Boolean, default: true },
         showLoadingUnloading: { type: Boolean, default: true },
