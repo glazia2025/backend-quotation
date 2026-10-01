@@ -63,14 +63,33 @@ const resolveAdminFallbackRate = (adminRate, userRate) => {
   return asUserRate;
 };
 
-const mergeOptionItems = (adminValues = {}, userValues = {}, adminColors = {}, userColors = {}) => {
-  const allNames = Array.from(new Set([...Object.keys(adminValues), ...Object.keys(userValues)])).sort();
-  return allNames.map((name) => {
+const mergeOptionItems = (
+  adminValues = {},
+  userValues = {},
+  adminColors = {},
+  userColors = {},
+  sortOrder = []
+) => {
+  const allNames = Array.from(
+    new Set([...Object.keys(adminValues), ...Object.keys(userValues)])
+  );
+
+  const orderedNames = [
+    ...sortOrder.filter((name) => allNames.includes(name)),
+    ...allNames
+      .filter((name) => !sortOrder.includes(name))
+      .sort(),
+  ];
+
+  return orderedNames.map((name) => {
     const adminRate = adminValues[name];
     const userRate = userValues[name];
     const hasAdmin = Object.prototype.hasOwnProperty.call(adminValues, name);
     const hasUser = Object.prototype.hasOwnProperty.call(userValues, name);
-    const rate = hasAdmin ? resolveAdminFallbackRate(adminRate, userRate) : Number(userRate) || 0;
+
+    const rate = hasAdmin
+      ? resolveAdminFallbackRate(adminRate, userRate)
+      : Number(userRate) || 0;
 
     return {
       name,
@@ -262,7 +281,13 @@ const listOptionSets = async (req, res) => {
       const globalAdminDoc = typeDocs.find((doc) => !doc.system);
       const adminValues = restoreRateMap(globalAdminDoc?.values);
       const adminColors = restoreStringMap(globalAdminDoc?.colors);
-      const items = mergeOptionItems(adminValues, userValues, adminColors, userColors);
+      const items = mergeOptionItems(
+  adminValues,
+  userValues,
+  adminColors,
+  userColors,
+  globalAdminDoc?.sortOrder || []
+);
 
       return {
         type: t,

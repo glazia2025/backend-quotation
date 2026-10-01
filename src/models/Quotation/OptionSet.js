@@ -14,6 +14,10 @@ const optionSetSchema = new mongoose.Schema(
       required: true,
       default: {},
     },
+    sortOrder: {
+      type: [String],
+      deafult: [],
+    },
     colors: { type: Map, of: String, default: {} },
     system: { type: mongoose.Schema.Types.ObjectId, ref: "System" }, // optional per-system override
   },
