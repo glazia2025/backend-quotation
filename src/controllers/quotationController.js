@@ -173,18 +173,81 @@ const getNextQuotationId = async (userId) => {
 
 //   return nextQuotationId;
 // };
+
 const fetchOptionValues = async (type, systemDoc) => {
   if (type === "colorFinish" || type === "meshType" || type === "glassSpec") {
-    const globalOption = await OptionSet.findOne({ type, system: { $exists: false } }).lean();
-    return mapToArray(globalOption?.values).map((item) => ({ ...item, color: restoreStringMap(globalOption?.colors)[item.name] || "" }));
+    const globalOption = await OptionSet.findOne({
+      type,
+      system: { $exists: false },
+    }).lean();
+
+    const values = restoreRateMap(globalOption?.values);
+    const colors = restoreStringMap(globalOption?.colors);
+    const sortOrder = globalOption?.sortOrder || [];
+
+    const orderedNames = [
+      ...sortOrder.filter((name) =>
+        Object.prototype.hasOwnProperty.call(values, name)
+      ),
+      ...Object.keys(values)
+        .filter((name) => !sortOrder.includes(name))
+        .sort(),
+    ];
+
+    return orderedNames.map((name) => ({
+      name,
+      rate: numberOr(values[name], 0),
+      color: colors[name] || "",
+    }));
   }
 
   if (systemDoc) {
-    const optionSet = await OptionSet.findOne({ type, system: systemDoc._id }).lean();
-    if (optionSet?.values) return mapToArray(optionSet.values);
+    const optionSet = await OptionSet.findOne({
+      type,
+      system: systemDoc._id,
+    }).lean();
+
+    if (optionSet?.values) {
+      const values = restoreRateMap(optionSet.values);
+      const sortOrder = optionSet.sortOrder || [];
+
+      const orderedNames = [
+        ...sortOrder.filter((name) =>
+          Object.prototype.hasOwnProperty.call(values, name)
+        ),
+        ...Object.keys(values)
+          .filter((name) => !sortOrder.includes(name))
+          .sort(),
+      ];
+
+      return orderedNames.map((name) => ({
+        name,
+        rate: numberOr(values[name], 0),
+      }));
+    }
   }
-  const globalOption = await OptionSet.findOne({ type, system: { $exists: false } }).lean();
-  return mapToArray(globalOption?.values);
+
+  const globalOption = await OptionSet.findOne({
+    type,
+    system: { $exists: false },
+  }).lean();
+
+  const values = restoreRateMap(globalOption?.values);
+  const sortOrder = globalOption?.sortOrder || [];
+
+  const orderedNames = [
+    ...sortOrder.filter((name) =>
+      Object.prototype.hasOwnProperty.call(values, name)
+    ),
+    ...Object.keys(values)
+      .filter((name) => !sortOrder.includes(name))
+      .sort(),
+  ];
+
+  return orderedNames.map((name) => ({
+    name,
+    rate: numberOr(values[name], 0),
+  }));
 };
 
 const pickHandleRule = (rules, systemType, series, description) => {
@@ -371,22 +434,33 @@ const getOptionLists = async (req, res) => {
     };
 
     const mergeAdminAndUserRates = (adminItems, type) => {
-      const adminMap = adminItems.reduce((acc, row) => {
-        acc[row.name] = numberOr(row.rate, 0);
-        return acc;
-      }, {});
-      const userMap = userOptionMap[type]?.values || {};
-      const userColors = userOptionMap[type]?.colors || {};
-      const names = unique([...Object.keys(adminMap), ...Object.keys(userMap)]).sort();
-      return names.map((name) => ({
-        name,
-        rate: Object.prototype.hasOwnProperty.call(adminMap, name)
-          ? effectiveRateWithAdminFallback(adminMap[name], userMap[name])
-          : numberOr(userMap[name], 0),
-        color: userColors[name] || adminItems.find((item) => item.name === name)?.color || (type === "colorFinish" ? defaultColorForFinish(name) : ""),
-      }));
-    };
+  const adminMap = adminItems.reduce((acc, row) => {
+    acc[row.name] = numberOr(row.rate, 0);
+    return acc;
+  }, {});
 
+  const userMap = userOptionMap[type]?.values || {};
+  const userColors = userOptionMap[type]?.colors || {};
+
+  const adminNames = adminItems.map((item) => item.name);
+
+  const userOnlyNames = Object.keys(userMap)
+    .filter((name) => !adminNames.includes(name))
+    .sort();
+
+  const names = [...adminNames, ...userOnlyNames];
+
+  return names.map((name) => ({
+    name,
+    rate: Object.prototype.hasOwnProperty.call(adminMap, name)
+      ? effectiveRateWithAdminFallback(adminMap[name], userMap[name])
+      : numberOr(userMap[name], 0),
+    color:
+      userColors[name] ||
+      adminItems.find((item) => item.name === name)?.color ||
+      (type === "colorFinish" ? defaultColorForFinish(name) : ""),
+  }));
+};
     const handleOptions = systemType
       ? await HandleOption.find({
         systemType,
