@@ -1,3 +1,4 @@
+const { removedSidesForRateItem, appliesToFrame } = require("../utils/combinationFrame");
 const mongoose = require("mongoose");
 const { performance } = require("node:perf_hooks");
 
@@ -206,7 +207,10 @@ const calculateProfileMaterialBaseRate = ({
   let totalWeightKg = 0;
   const otherMaterials = [];
 
-  (schedule?.lines || []).filter((line) => line.itemType === "profile").forEach((line) => {
+  const removedSides = removedSidesForRateItem(item);
+  const configuredProfiles = (schedule?.lines || []).filter(line => line.itemType === "profile");
+  const applicableProfiles = configuredProfiles.filter(line => appliesToFrame(line, removedSides));
+  applicableProfiles.forEach((line) => {
     const code = String(line.sapCode || "").trim().toUpperCase();
     const product = productsByCode.get(code);
     const metadata = profileMetadataByCode.get(code) || product;
@@ -302,7 +306,7 @@ const calculateProfileMaterialBaseRate = ({
 
   materialValue = round2(materialValue);
   totalWeightKg = round3(totalWeightKg);
-  if (!profiles.length) {
+  if (!profiles.length && (applicableProfiles.length || !configuredProfiles.length)) {
     throw new Error("Cutting schedule contains no priceable profile entries");
   }
   return {

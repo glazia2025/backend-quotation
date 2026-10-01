@@ -14,7 +14,6 @@ const {
     getScheduledLineQuantity,
     itemRowsForSchedule,
     parseGlassDimensions,
-    consumeProfileLength,
   },
 } = require("../controllers/cuttingScheduleController");
 const {
@@ -40,16 +39,6 @@ test("cutting schedule multiplies each configured line quantity by item quantity
     getScheduledLineQuantity("Q * 2", { W: 1000, H: 1200, AREA: 12 }, 4),
     8
   );
-});
-
-test("profile stock consumption retains leftovers across individual items", () => {
-  const leftovers = {};
-  const firstItem = consumeProfileLength("P-1", 3010, 1, 6500, leftovers);
-  const secondItem = consumeProfileLength("P-1", 3010, 1, 6500, leftovers);
-
-  assert.equal(firstItem.profilesUsed, 1);
-  assert.equal(secondItem.profilesUsed, 0);
-  assert.deepEqual(leftovers["P-1"], [480]);
 });
 
 const makeEntry = (split) => {

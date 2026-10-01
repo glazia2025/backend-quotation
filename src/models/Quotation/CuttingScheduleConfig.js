@@ -14,6 +14,7 @@ const cuttingScheduleLineSchema = new mongoose.Schema(
     quantityFormula: { type: String, required: true, trim: true, default: "1" },
     dimensionFormula: { type: String, trim: true, default: "" },
     cutAngle: { type: String, trim: true, default: "" },
+    placement: { type: String, enum: ["", "outer-left", "outer-right", "outer-top", "outer-bottom", "inner"], default: "" },
     position: { type: String, trim: true, default: "" },
     unit: { type: String, trim: true, default: "Pcs" },
     sortOrder: { type: Number, default: 0 },
