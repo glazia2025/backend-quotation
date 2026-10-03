@@ -18,7 +18,7 @@ const { getOrGeneratePdf } = require("../utils/pdfCache");
 const { restoreRateMap } = require("../utils/rateMapUtils");
 const { hydrateQuotationItems } = require("../utils/quotationItems");
 const { inlineQuotationImages } = require("../utils/quotationImages");
-const { resolveLinkedHardware } = require("../utils/hardwareLinking");
+const { resolveLinkedHardware, loadGlassThicknesses } = require("../utils/hardwareLinking");
 const {
   catalogProductKey,
   escapeHtml,
@@ -928,6 +928,7 @@ const getUserPricingContext = async (userId) => {
     dynamicPricing: {
       profiles: normalizeDynamicMap(user?.dynamicPricing?.profiles),
     },
+    glassThicknesses: restoreRateMap(glassAdminDoc?.glassThicknessMm),
     glassRates: {
       ...restoreRateMap(glassAdminDoc?.values),
       ...restoreRateMap(glassUserDoc?.values),
@@ -1226,6 +1227,7 @@ const buildBomData = async (quotation) => {
       }
       }
       const linkedHardware = resolveLinkedHardware({
+        glassThicknesses: pricingContext.glassThicknesses,
         config: hardwareLinkingConfig, glassSpec,
         widthMm: toNumber(item.width), heightMm: toNumber(item.height),
         hardwareOpeningType: item.hardwareOpeningType,
@@ -1469,6 +1471,7 @@ const buildScheduleData = async (quotation) => {
     }).lean(),
   ]);
 
+  const glassThicknesses = hardwareLinkingConfigs.length ? await loadGlassThicknesses() : {};
   const configMap = configs.reduce((acc, config) => {
     acc[cuttingScheduleMapKey(config)] = config;
     return acc;
@@ -1685,6 +1688,7 @@ const buildScheduleData = async (quotation) => {
     rows.push(...beadingRows);
     rows.push(...gasketRows);
     const linkedHardware = resolveLinkedHardware({
+      glassThicknesses,
       config: hardwareLinkingConfigMap[key], glassSpec: item.glassSpec,
       widthMm: toNumber(item.width), heightMm: toNumber(item.height),
       hardwareOpeningType: item.hardwareOpeningType,

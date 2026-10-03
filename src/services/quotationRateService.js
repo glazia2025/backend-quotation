@@ -11,7 +11,7 @@ const ProfileOptions = require("../models/ProfileOptions");
 const User = require("../models/User");
 const { evaluateFormula, round3, toNumber } = require("../utils/cuttingSchedule");
 const { restoreRateMap } = require("../utils/rateMapUtils");
-const { resolveLinkedHardware } = require("../utils/hardwareLinking");
+const { resolveLinkedHardware, loadGlassThicknesses } = require("../utils/hardwareLinking");
 
 const DEFAULT_PROFILE_ADJUSTMENT = 100;
 const CUT_ALLOWANCE_MM = 10;
@@ -191,6 +191,7 @@ const calculateProfileMaterialBaseRate = ({
   hardwareByCode = new Map(),
   glassBeadingConfig,
   hardwareLinkingConfig,
+  glassThicknesses = {},
   nalcoPrice,
 }) => {
   const width = toNumber(item.frameWidth, toNumber(item.width));
@@ -262,6 +263,7 @@ const calculateProfileMaterialBaseRate = ({
   });
 
   const linkedHardware = resolveLinkedHardware({
+    glassThicknesses,
     config: hardwareLinkingConfig,
     glassSpec: item.glassSpec,
     widthMm: width,
@@ -410,6 +412,7 @@ const calculateQuotationItemRates = async ({ items, userId, onTiming }) => {
     userId ? timed("user_pricing", () => User.findById(userId).select("dynamicPricing.profiles -_id").lean()) : null,
     timed("nalco", getLatestNalcoPrice),
   ]);
+  const glassThicknesses = hardwareLinkingConfigs.length ? await timed("glass_thickness", loadGlassThicknesses) : {};
   if (nalcoPrice <= 0) throw new Error("Latest NALCO price is unavailable");
 
   const configMap = new Map(configs.map((config) => [
@@ -472,6 +475,7 @@ const calculateQuotationItemRates = async ({ items, userId, onTiming }) => {
         profilePricing,
         hardwareByCode,
         glassBeadingConfig: glassConfigMap.get(`${item.systemType}||${item.series}||${item.description}||${item.glassSpec || ""}`),
+        glassThicknesses,
         hardwareLinkingConfig: hardwareLinkingMap.get(`${item.systemType}||${item.series}||${item.description}`),
         nalcoPrice,
       }),

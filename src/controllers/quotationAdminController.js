@@ -160,6 +160,25 @@ const deleteSeries = async (req, res) => {
   }
 };
 
+// Validate without turning invalid thicknesses into zero. Missing legacy values
+// stay unspecified; keys use the same escaping as the glass-name/rate map.
+const normalizeGlassThickness = (input) => {
+  if (input === undefined) return undefined;
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    const error = new Error("Glass thickness must be a map of glass names to millimetres");
+    error.statusCode = 400;
+    throw error;
+  }
+  for (const value of Object.values(input)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      const error = new Error("Glass thickness must be a positive number in mm");
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+  return normalizeRateMap(input);
+};
+
 // -------- OptionSet CRUD --------
 const createOptionSet = async (req, res) => {
   try {
@@ -177,15 +196,17 @@ const createOptionSet = async (req, res) => {
       ...payload,
       values: normalizeRateMap(payload.values),
       colors: normalizeStringMap(payload.colors),
+      glassThicknessMm: normalizeGlassThickness(payload.glassThicknessMm),
       system: constrainedTypes.includes(payload.type) ? undefined : system?._id,
     });
     const normalized = optionSet.toObject();
     normalized.values = restoreRateMap(optionSet.values);
     normalized.colors = restoreStringMap(optionSet.colors);
+    normalized.glassThicknessMm = restoreRateMap(optionSet.glassThicknessMm);
     res.status(201).json(normalized);
   } catch (error) {
     console.error("createOptionSet error", error);
-    res.status(500).json({ message: "Unable to create option set", error: error.message });
+    res.status(error.statusCode || 500).json({ message: "Unable to create option set", error: error.message });
   }
 };
 
@@ -208,6 +229,7 @@ const listOptionSets = async (req, res) => {
       ...item,
       values: restoreRateMap(item.values),
       colors: restoreStringMap(item.colors),
+      glassThicknessMm: restoreRateMap(item.glassThicknessMm),
     }));
     res.json({ optionSets: restored });
   } catch (error) {
@@ -218,7 +240,7 @@ const listOptionSets = async (req, res) => {
 
 const updateOptionSet = async (req, res) => {
   try {
-    const { values, colors, ...rest } = req.body;
+    const { values, colors, glassThicknessMm, ...rest } = req.body;
     const payload = { ...rest };
     const constrainedTypes = ["colorFinish", "glassSpec", "meshType"];
     if (payload.type && constrainedTypes.includes(payload.type)) {
@@ -228,6 +250,7 @@ const updateOptionSet = async (req, res) => {
       payload.values = normalizeRateMap(values);
     }
     if (colors !== undefined) payload.colors = normalizeStringMap(colors);
+    if (glassThicknessMm !== undefined) payload.glassThicknessMm = normalizeGlassThickness(glassThicknessMm);
     const optionSet = await OptionSet.findByIdAndUpdate(req.params.id, payload, {
       new: true,
       runValidators: true,
@@ -236,10 +259,11 @@ const updateOptionSet = async (req, res) => {
     const normalized = optionSet.toObject();
     normalized.values = restoreRateMap(optionSet.values);
     normalized.colors = restoreStringMap(optionSet.colors);
+    normalized.glassThicknessMm = restoreRateMap(optionSet.glassThicknessMm);
     res.json(normalized);
   } catch (error) {
     console.error("updateOptionSet error", error);
-    res.status(500).json({ message: "Unable to update option set", error: error.message });
+    res.status(error.statusCode || 500).json({ message: "Unable to update option set", error: error.message });
   }
 };
 

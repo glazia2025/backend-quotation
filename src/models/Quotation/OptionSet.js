@@ -18,6 +18,7 @@ const optionSetSchema = new mongoose.Schema(
       type: [String],
       deafult: [],
     },
+    glassThicknessMm: { type: Map, of: { type: Number, min: 0.001 }, default: {} },
     colors: { type: Map, of: String, default: {} },
     system: { type: mongoose.Schema.Types.ObjectId, ref: "System" }, // optional per-system override
   },

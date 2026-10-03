@@ -192,6 +192,7 @@ test("scheduled and linked hardware ignore legacy user adjustments while profile
       profilePricing: { Sliding: 150 },
       hardwareByCode: new Map([["H", { rate: 25, subCategory: "Locks" }]]),
       hardwarePricing,
+      glassThicknesses: { "6mm Clear": 6 },
       hardwareLinkingConfig: { shutterCount: 2, glassRules: [{
         glassSpec: "6mm Clear", conditions: [{ operator: ">=", weightKg: 0,
           hardware: [{ sapCode: "H", quantity: 1, applicability: "always" }],
