@@ -30,6 +30,7 @@ const {
   getBomData,
   getOptimizedFinal,
   generateBomPdf,
+  generateOptimizationPdf,
   generateGlassReportPdf,
   generateCuttingSchedulePdf,
 } = require("../controllers/cuttingScheduleController");
@@ -86,6 +87,7 @@ router.get("/:id/pdf-url", isUser, prepareQuotationPdfController);
 router.get("/:id/pdf-status", isUser, getQuotationPdfStatusController);
 router.get("/:id/elevation-pdf", isUser, generateElevationPdfController);
 router.get("/:id/export-excel", isUser, exportQuotationExcel);
+router.get("/:id/optimization-report", isUser, generateOptimizationPdf);
 router.get("/:id/bom", isUser, generateBomPdf);
 router.get("/:id/glass-report", isUser, generateGlassReportPdf);
 router.get("/:id/bom-data", isUser, getBomData);

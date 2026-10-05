@@ -1,3 +1,6 @@
+const { PROFILE_PLACEMENTS, getMullionRemovedSides, appliesToFrame } = require("../utils/combinationFrame");
+const { buildOptimizationReportHtml, optimizationPdfChrome } = require("../utils/optimizationReport");
+const { allocateProfileCuts } = require("../utils/profileOptimizer");
 const mongoose = require("mongoose");
 const fs = require("fs");
 const path = require("path");
@@ -152,6 +155,11 @@ const normalizeLineType = (value) =>
 
 const normalizeLine = (line = {}, index = 0) => {
   const itemType = normalizeLineType(line.itemType);
+  if (line.placement && !PROFILE_PLACEMENTS.includes(line.placement)) {
+    const error = new Error("Invalid profile placement");
+    error.statusCode = 400;
+    throw error;
+  }
   return {
     itemType,
     sapCode: String(line.sapCode || "").trim(),
@@ -167,6 +175,7 @@ const normalizeLine = (line = {}, index = 0) => {
       itemType === "hardware" || itemType === "glass"
         ? ""
         : String(line.cutAngle || line.cutAngleLeft || line.cutAngleRight || "").trim(),
+    placement: itemType === "profile" ? String(line.placement || "") : "",
     position: String(line.position || "").trim(),
     unit: String(line.unit || (itemType === "glass" ? "Sqft" : "Pcs")).trim(),
     sortOrder: Number.isFinite(Number(line.sortOrder)) ? Number(line.sortOrder) : index,
@@ -314,7 +323,7 @@ const upsertConfig = async (req, res) => {
     res.json({ message: "Cutting schedule config saved", config });
   } catch (error) {
     console.error("upsertConfig error", error);
-    res.status(500).json({ message: "Unable to save cutting schedule config", error: error.message });
+    res.status(error.statusCode || 500).json({ message: "Unable to save cutting schedule config", error: error.message });
   }
 };
 
@@ -355,9 +364,10 @@ const getBeadingCatalog = async (_req, res) => {
 
 const itemRowsForSchedule = (quotation) => {
   const rows = [];
-  (quotation.items || []).forEach((item) => {
+  (quotation.items || []).forEach((item, itemIndex) => {
     if (item.systemType === "Combination" && Array.isArray(item.subItems) && item.subItems.length) {
       const layoutLeaves = collectLayoutLeaves(item.configuratorLayout);
+      const removedSides = getMullionRemovedSides(item.configuratorLayout, item.joins);
       item.subItems.forEach((subItem, index) => {
         const subItemId = String(subItem.id || subItem._id || "");
         const layoutLeaf =
@@ -369,6 +379,11 @@ const itemRowsForSchedule = (quotation) => {
         const height = layoutHeight > 0 ? Math.round(layoutHeight) : toNumber(subItem.height);
         rows.push({
           ...subItem,
+          removedFrameSides: removedSides.get(String(layoutLeaf?.id)) || [],
+          optimizationRefKey: String(itemIndex + 1),
+          optimizationRefCode: item.refCode || `Item ${itemIndex + 1}`,
+          optimizationItemKey: `${itemIndex + 1}.${index + 1}`,
+          optimizationItemLabel: `${item.refCode || `Item ${itemIndex + 1}`} / ${subItem.refCode || `Section ${index + 1}`}`,
           width,
           height,
           area:
@@ -389,7 +404,7 @@ const itemRowsForSchedule = (quotation) => {
       });
       return;
     }
-    rows.push(item);
+    rows.push({ ...item, optimizationRefKey: String(itemIndex + 1), optimizationRefCode: item.refCode || `Item ${itemIndex + 1}`, optimizationItemKey: String(itemIndex + 1), optimizationItemLabel: item.refCode || `Item ${itemIndex + 1}` });
   });
   return rows;
 };
@@ -965,71 +980,6 @@ const getProfileRateBySapCode = (profileOption, sapCode) => {
   return 0;
 };
 
-function consumeProfileLength(
-  sapCode,
-  pieceLength,
-  quantity,
-  stockLength,
-  leftoverBySap
-) {
-  pieceLength = toNumber(pieceLength);
-  quantity = Math.max(0, Math.round(toNumber(quantity)));
-  stockLength = toNumber(stockLength);
-
-  if (pieceLength <= 0 || quantity <= 0 || stockLength <= 0) {
-    return {
-      profilesUsed: 0,
-      leftovers: leftoverBySap[sapCode] || [],
-    };
-  }
-
-  if (!leftoverBySap[sapCode]) {
-    leftoverBySap[sapCode] = [];
-  }
-
-  const leftovers = leftoverBySap[sapCode];
-
-  let profilesUsed = 0;
-
-  for (let q = 0; q < quantity; q++) {
-    let bestIndex = -1;
-    let minimumWaste = Infinity;
-
-    for (let i = 0; i < leftovers.length; i++) {
-      if (leftovers[i] >= pieceLength) {
-        const waste = leftovers[i] - pieceLength;
-
-        if (waste < minimumWaste) {
-          minimumWaste = waste;
-          bestIndex = i;
-        }
-      }
-    }
-
-    if (bestIndex !== -1) {
-      leftovers[bestIndex] -= pieceLength;
-
-      if (leftovers[bestIndex] <= 0) {
-        leftovers.splice(bestIndex, 1);
-      }
-
-      continue;
-    }
-    profilesUsed++;
-
-    const remaining = stockLength - pieceLength;
-
-    if (remaining > 0) {
-      leftovers.push(remaining);
-    }
-  }
-
-  return {
-    profilesUsed,
-    leftovers,
-  };
-}
-
 const addBomRow = (groups, row) => {
   const key = [
     row.type,
@@ -1114,7 +1064,7 @@ const buildBomData = async (quotation) => {
   );
 
   const groups = new Map();
-  const leftoverBySap = {};
+  const profileDemands = [];
   const notes = [];
 
   for (const item of sourceItems) {
@@ -1130,9 +1080,8 @@ const buildBomData = async (quotation) => {
     const variables = {
       W: frameWidth,
       H: frameHeight,
-      // BOM cutting is simulated one physical quotation item at a time. Keeping
-      // Q at 1 makes configured formulas describe one item and avoids turning
-      // repeated items into a single bulk cutting request.
+      // Expand formulas per physical item, then optimize all profile cuts
+      // together across the quotation.
       Q: 1,
       AREA:
         toNumber(item.frameArea) ||
@@ -1149,6 +1098,7 @@ const buildBomData = async (quotation) => {
 
     for (let itemIndex = 0; itemIndex < itemQuantity; itemIndex += 1) {
       for (const line of schedule?.lines || []) {
+      if (!appliesToFrame(line, item.removedFrameSides)) continue;
       const qty = evaluateFormula(line.quantityFormula || "1", variables);
       let dimension = "";
       if (
@@ -1175,34 +1125,27 @@ const buildBomData = async (quotation) => {
         const lengthMm = toNumber(dimension, toNumber(product?.length, 0));
         const pieceLength = lengthMm + 10;
         const stockLength = toNumber(product?.length);
-        const result = consumeProfileLength(
-          line.sapCode,
-          pieceLength,
-          qty,
-          stockLength,
-          leftoverBySap
-        );
+        const demand = { sapCode: line.sapCode, pieceLength, quantity: qty, stockLength, cutLengthMm: lengthMm, allowanceMm: 10, position: line.position || (/\bH\b/.test(line.dimensionFormula || "") ? "H" : /\bW\b/.test(line.dimensionFormula || "") ? "W" : ""), cutAngle: line.cutAngle };
         const weightKg = round3(
-  result.profilesUsed *
     (toNumber(product?.length, 0) / 1000) *
     toNumber(product?.kgm, 0)
 );
 
 
-        addBomRow(groups, {
+        profileDemands.push({ ...demand, source: { color: item.colorFinish, refKey: item.optimizationRefKey, refCode: item.optimizationRefCode, key: `${item.optimizationItemKey}:${itemIndex + 1}`, label: item.optimizationItemLabel, instance: itemIndex + 1 }, row: {
           type: "Profile",
           system: item.systemType,
           series: item.series,
           description: line.description || product?.label || line.sapCode,
           itemCode: line.sapCode,
-          quantity: result.profilesUsed,
+          quantity: 1,
           unit: product?.system || "Kg",
           measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
           rate,
           amount: rate * weightKg,
           weightKg,
 
-        });
+        } });
         continue;
       }
 
@@ -1260,32 +1203,25 @@ const buildBomData = async (quotation) => {
         const pieceLength = lengthMm + 10;
         const pieceQty = toNumber(beading.quantity, 1);
         const stockLength = toNumber(beadingProduct?.length);
-        const result = consumeProfileLength(
-          beading.sapCode,
-          pieceLength,
-          pieceQty,
-          stockLength,
-          leftoverBySap
-        );
-        const beadingAmount = round2(result.profilesUsed * beadingRate);
+        const demand = { sapCode: beading.sapCode, pieceLength, quantity: pieceQty, stockLength, cutLengthMm: lengthMm, allowanceMm: 10, position: /\bH\b/.test(beading.formula || "") ? "H" : /\bW\b/.test(beading.formula || "") ? "W" : "" };
+        const beadingAmount = round2(beadingRate);
         const beadingWeightKg = round3(
-  result.profilesUsed *
     (stockLength / 1000) *
     toNumber(beadingProduct?.kgm, 0)
 );
-        addBomRow(groups, {
+        profileDemands.push({ ...demand, source: { color: item.colorFinish, refKey: item.optimizationRefKey, refCode: item.optimizationRefCode, key: `${item.optimizationItemKey}:${itemIndex + 1}`, label: item.optimizationItemLabel, instance: itemIndex + 1 }, row: {
           type: "Beading",
           system: item.systemType,
           series: item.series,
           description: beading.description,
           itemCode: beading.sapCode,
-           quantity: result.profilesUsed,
+           quantity: 1,
           unit: "sqft",
         measureLabel: `${round3(lengthMm)} mm`,
           rate: beadingRate,
           amount: beadingAmount,
           weightKg: beadingWeightKg,
-        });
+        } });
       });
       }
       if (glassBeadingConfig) {
@@ -1346,23 +1282,16 @@ const buildBomData = async (quotation) => {
       );
       const lengthMm = toNumber(evaluateFormula(line.formula || "H", variables));
       const pieceQuantity = Math.max(0, toNumber(line.quantity, 1));
-      const result = consumeProfileLength(
-        line.sapCode,
-        lengthMm + 10,
-        pieceQuantity,
-        toNumber(product?.length),
-        leftoverBySap
-      );
+      const demand = { sapCode: line.sapCode, pieceLength: lengthMm + 10, quantity: pieceQuantity, stockLength: toNumber(product?.length), cutLengthMm: lengthMm, allowanceMm: 10, position: /\bH\b/.test(line.formula || "H") ? "H" : "W" };
       
       const weightKg = round3(
-  result.profilesUsed *
     (toNumber(product?.length, 0) / 1000) *
     toNumber(product?.kgm, 0)
 );
 
       const adjustment = getProfileAdjustment(product, pricingContext);
       const rate = round2(toNumber(pricingContext.nalcoPrice) / 1000 + adjustment);
-      addBomRow(groups, {
+      profileDemands.push({ ...demand, source: { color: entry.parent.colorFinish, refKey: String(quotation.items.indexOf(entry.parent) + 1), refCode: entry.parent.refCode || `Item ${quotation.items.indexOf(entry.parent) + 1}`, key: `join:${quotation.items.indexOf(entry.parent) + 1}:${itemIndex + 1}`, label: `${entry.parent.refCode || `Item ${quotation.items.indexOf(entry.parent) + 1}`} / joins`, instance: itemIndex + 1 }, row: {
         type: entry.join.type,
         system: entry.systemType,
         series: entry.series,
@@ -1370,17 +1299,30 @@ const buildBomData = async (quotation) => {
           line.description || product?.label || line.sapCode
         }`,
         itemCode: line.sapCode,
-        quantity: result.profilesUsed,
+        quantity: 1,
         unit: product?.system || "Kg",
         measureLabel: `${round3(lengthMm)} mm / ${weightKg} kg`,
         rate,
         amount: rate * weightKg,
         weightKg,
 
-      });
+      } });
       }
     }
   }
+
+  const { rows: allocatedRows, plans: profileCuttingPlans } = allocateProfileCuts(profileDemands);
+  profileCuttingPlans.forEach(plan => {
+    const product = catalogProducts.get(catalogProductKey({ itemType: "profile", sapCode: plan.sapCode }));
+    plan.description = product?.description || product?.part || plan.sapCode;
+    plan.image = product?.image || "";
+    plan.kgm = toNumber(product?.kgm);
+    plan.colors = [...new Set(plan.bars.flatMap(bar => bar.cuts.map(cut => cut.source?.color)).filter(Boolean))];
+  });
+  allocatedRows.forEach(row => addBomRow(groups, row));
+  profileCuttingPlans.filter(plan => !plan.optimal).forEach(plan => {
+    notes.push(`Profile ${plan.sapCode}: optimization search limit reached; ${plan.barCount} bars found, minimum not proven.`);
+  });
 
   const rows = Array.from(groups.values()).sort((a, b) =>
     `${a.type} ${a.description} ${a.itemCode}`.localeCompare(
@@ -1437,6 +1379,7 @@ const buildBomData = async (quotation) => {
     generatedAt: new Date(),
     nalcoPrice: pricingContext.nalcoPrice,
     rows,
+    profileCuttingPlans,
     profileRows,
     hardwareRows,
     profileQuantity,
@@ -1536,6 +1479,7 @@ const buildScheduleData = async (quotation) => {
     const notes = [];
 
     for (const line of schedule?.lines || []) {
+      if (!appliesToFrame(line, item.removedFrameSides)) continue;
       const glassRef =
         line.itemType === "glass"
           ? String(line.glassRef || "G1").trim().toUpperCase()
@@ -2515,6 +2459,29 @@ const findQuotationForUser = async (req, res, hydrate = true) => {
   return hydrate ? hydrateQuotationItems(quotation) : quotation;
 };
 
+const renderOptimizationPdfBuffer = async (quotation) => {
+  let browserHandle;
+  let page;
+  try {
+    const data = await buildBomData(quotation);
+    const html = buildOptimizationReportHtml(data);
+    browserHandle = await launchPdfBrowser();
+    page = await browserHandle.browser.newPage();
+    await setPdfContent(page, html);
+    return await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "32mm", right: "10mm", bottom: "18mm", left: "10mm" },
+      displayHeaderFooter: true,
+      ...optimizationPdfChrome(data),
+      preferCSSPageSize: true,
+    });
+  } finally {
+    if (page && !page.isClosed()) await page.close();
+    await closePdfBrowser(browserHandle);
+  }
+};
+
 const renderBomPdfBuffer = async (quotation) => {
   let browserHandle;
   let page;
@@ -2583,6 +2550,37 @@ const generateGlassReportPdf = async (req, res) => {
   }
 };
 
+const generateOptimizationPdf = async (req, res) => {
+  try {
+    const quotation = await findQuotationForUser(req, res, false);
+    if (!quotation) return null;
+
+    const { buffer: pdfBuffer, cacheStatus } = await getOrGeneratePdf({
+      quotation,
+      type: "optimization",
+      generate: async () => renderOptimizationPdfBuffer(await hydrateQuotationItems(quotation)),
+    });
+
+    const projectCode = quotation.generatedId || quotation.quotationDetails?.id || String(quotation._id);
+    const fileName = `${projectCode || "quotation"}-optimization.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    res.setHeader("X-PDF-Cache", cacheStatus);
+    return res.end(pdfBuffer);
+  } catch (error) {
+    console.error("generateOptimizationPdf error", error);
+    if (error.code === "ENOSPC") {
+      return res.status(507).json({
+        message: "Server does not have enough free disk space to generate optimization report PDF",
+        error: error.message,
+      });
+    }
+    res.status(500).json({ message: "Failed to generate optimization report PDF", error: error.message });
+    return null;
+  }
+};
+
 const generateBomPdf = async (req, res) => {
   try {
     const quotation = await findQuotationForUser(req, res, false);
@@ -2627,6 +2625,7 @@ const getBomData = async (req, res) => {
       customer: data.customer,
       rows: data.rows,
       profileRows: data.profileRows,
+      profileCuttingPlans: data.profileCuttingPlans,
       hardwareRows: data.hardwareRows,
       profileQuantity: data.profileQuantity,
       profileWeight: data.profileWeight,
@@ -2653,6 +2652,7 @@ const getOptimizedFinal = async (req, res) => {
     const data = await buildBomData(quotation);
     return res.status(200).json({
       optimizedFinal: round2(data.totals.grand),
+      notes: data.notes,
       nalcoPrice: data.nalcoPrice,
       calculatedAt: new Date().toISOString(),
     });
@@ -2667,6 +2667,8 @@ const getOptimizedFinal = async (req, res) => {
 
 module.exports = {
   __test: {
+    buildBomData,
+    buildScheduleData,
     buildGlassDimensionEffects,
     compileGlassRows,
     consolidateCombinationGlassSections: consolidateCombinationSections,
@@ -2678,7 +2680,6 @@ module.exports = {
     itemRowsForSchedule,
     getJoinLinesForOrientation,
     getScheduledLineQuantity,
-    consumeProfileLength,
     parseGlassDimensions,
   },
   deleteConfig,
@@ -2686,6 +2687,7 @@ module.exports = {
   getBomData,
   getOptimizedFinal,
   generateBomPdf,
+  generateOptimizationPdf,
   generateGlassReportPdf,
   generateCuttingSchedulePdf,
   renderBomPdfBuffer,
