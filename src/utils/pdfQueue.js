@@ -11,7 +11,7 @@ const PdfGenerationJob = require("../models/Quotation/PdfGenerationJob");
 const QUEUE_URL = String(process.env.QUOTATION_PDF_SQS_QUEUE_URL || "").trim();
 const WAIT_SECONDS = Math.min(20, Math.max(1, Number(process.env.QUOTATION_PDF_SQS_WAIT_SECONDS || 20)));
 const VISIBILITY_SECONDS = Math.max(30, Number(process.env.QUOTATION_PDF_SQS_VISIBILITY_SECONDS || 90));
-const sqs = new SQSClient({ region: process.env.AWS_REGION });
+const sqs = new SQSClient({ region: process.env.AWS_SQS_REGION || process.env.AWS_REGION });
 
 const isSqsPdfQueueEnabled = () => Boolean(QUEUE_URL);
 
