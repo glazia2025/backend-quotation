@@ -28,7 +28,7 @@ let _s3Client = null;
 const getS3Client = () => {
   if (!_s3Client) {
     _s3Client = new S3Client({
-      region: process.env.AWS_REGION || "eu-north-1",
+      region: process.env.AWS_S3_REGION || process.env.AWS_REGION || "eu-north-1",
       credentials:
         process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
           ? {
@@ -61,7 +61,7 @@ const extensionByMimeType = {
 const quotationImagePrefix = (quotationId) => `quotations/${quotationId}/`;
 
 const buildPublicUrl = (key) => {
-  const region = process.env.AWS_REGION || "eu-north-1";
+  const region = process.env.AWS_S3_REGION || process.env.AWS_REGION || "eu-north-1";
   return `https://${QUOTATION_S3_BUCKET}.s3.${region}.amazonaws.com/${key}`;
 };
 
@@ -290,7 +290,7 @@ const parseImage = (value) => {
 
 const assertConfigured = () => {
   const bucket = process.env.QUOTATION_S3_BUCKET || QUOTATION_S3_BUCKET || "quotation-img";
-  const region = process.env.AWS_REGION || "eu-north-1";
+  const region = process.env.AWS_S3_REGION || process.env.AWS_REGION || "eu-north-1";
   if (!bucket || !region) {
     const error = new Error("S3 is not configured for quotation images");
     error.statusCode = 500;
