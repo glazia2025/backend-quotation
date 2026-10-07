@@ -93,9 +93,9 @@ router.get("/:id/glass-report", isUser, generateGlassReportPdf);
 router.get("/:id/bom-data", isUser, getBomData);
 router.get("/:id/optimized-final", isUser, getOptimizedFinal);
 router.get("/:id/cutting-schedule", isUser, generateCuttingSchedulePdf);
-router.get("/chart/:userId",getChartData);
-router.get("/stats/:userId", getDashboardStats);
-router.get("/sales-per-month/:userId", getSalesPerMonth);
+router.get("/chart/:userId", isUser, getChartData);
+router.get("/stats/:userId", isUser, getDashboardStats);
+router.get("/sales-per-month/:userId", isUser, getSalesPerMonth);
 
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { assertUniqueReferences } = require('./quotationReferences');
 const QuotationItem = require("../models/Quotation/QuotationItem");
 const { normalizeQuotationImageReferences } = require("./quotationImages");
 
@@ -54,6 +55,7 @@ async function createQuotationItems(quotationId, items = []) {
   }
 
   const documents = [];
+  assertUniqueReferences(items);
   const topLevelIds = [];
 
   for (const item of items) {

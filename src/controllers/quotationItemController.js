@@ -12,6 +12,21 @@ const {
   uploadQuotationImages,
 } = require("../utils/quotationImages");
 const { scheduleQuotationPdfWarmup } = require("../utils/pdfWarmup");
+const { assertReferenceAvailable } = require('../utils/quotationReferences');
+
+async function checkReference(quotation, item, excludedId) {
+  if (!quotation.quotationItems?.length) return;
+  const existing = await QuotationItem.find({
+    _id: { $in: quotation.quotationItems || [] },
+  }).select('_id refCode').lean();
+  assertReferenceAvailable(existing, item, excludedId);
+}
+
+function concurrentItemChange() {
+  const error = new Error('Quotation items changed while saving. Refresh the quotation and try again.');
+  error.statusCode = 409;
+  return error;
+}
 
 const isOwner = (quotation, user) =>
   user?.role === "admin" ||
@@ -72,13 +87,14 @@ const createQuotationItem = async (req, res) => {
   let createdIds = [];
   let committed = false;
   try {
-    const quotation = await timed("quotation_lookup", () => findQuotation(req, res, "_id user"));
+    const quotation = await timed("quotation_lookup", () => findQuotation(req, res, "_id user quotationItems"));
     if (!quotation) return;
     const item = req.body?.item ?? req.body;
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       return res.status(400).json({ message: "Quotation item is required" });
     }
 
+    await checkReference(quotation, item);
     prepared = await timed("image_upload", () => uploadQuotationImages({
       quotationId: quotation._id,
       items: [item],
@@ -86,15 +102,13 @@ const createQuotationItem = async (req, res) => {
     const created = await timed("item_insert", () => createQuotationItems(quotation._id, prepared.items));
     createdIds = created.allIds;
     // Append atomically without loading/replacing the whole item reference list.
-    const updatedQuotation = await timed("quotation_update", () => Quotation.findByIdAndUpdate(
-      quotation._id,
+    const updatedQuotation = await timed("quotation_update", () => Quotation.findOneAndUpdate(
+      { _id: quotation._id, quotationItems: quotation.quotationItems || [] },
       { $push: { quotationItems: created.topLevelIds[0] } },
       { new: true, runValidators: true }
     ).select("_id updatedAt").lean());
     if (!updatedQuotation) {
-      const error = new Error("Quotation no longer exists");
-      error.statusCode = 404;
-      throw error;
+      throw concurrentItemChange();
     }
     committed = true;
 
@@ -143,6 +157,8 @@ const updateQuotationItem = async (req, res) => {
       return res.status(400).json({ message: "Quotation item is required" });
     }
 
+    await checkReference(quotation, item, req.params.itemId);
+    const originalIds = [...quotation.quotationItems];
     const previousItem = await hydrateItem(quotation, req.params.itemId);
     const previousImageKeys = collectQuotationImageKeys({ items: [previousItem] });
     prepared = await uploadQuotationImages({
@@ -153,8 +169,15 @@ const updateQuotationItem = async (req, res) => {
     replacementIds = replacement.allIds;
     const replacementId = replacement.topLevelIds[0];
     quotation.quotationItems[index] = replacementId;
-    await touchQuotation(quotation, req.user?.userId);
+    const updated = await Quotation.findOneAndUpdate(
+      { _id: quotation._id, quotationItems: originalIds },
+      { $set: { quotationItems: quotation.quotationItems } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) throw concurrentItemChange();
+    quotation.updatedAt = updated.updatedAt;
     committed = true;
+    await scheduleQuotationPdfWarmup(quotation._id, req.user?.userId).catch(() => {});
 
     await QuotationItem.deleteMany({
       quotation: quotation._id,

@@ -12,7 +12,7 @@ export const getChartData=async(req,res)=>{
        const data = await Quotation.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(userId),
+          user: new mongoose.Types.ObjectId(userId), ...(req.quotationScope?.createdByActor ? { createdByActor: req.quotationScope.createdByActor } : {}),
           "quotationDetails.date": {
             $gte: startDate,
             $lt: endDate
@@ -118,7 +118,7 @@ export const getDashboardStats = async (req, res) => {
     const result = await Quotation.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(userId),
+          user: new mongoose.Types.ObjectId(userId), ...(req.quotationScope?.createdByActor ? { createdByActor: req.quotationScope.createdByActor } : {}),
           $expr: {
             $and: [
               {
@@ -175,7 +175,7 @@ export const getSalesPerMonth = async (req, res) => {
     const data = await Quotation.aggregate([
       {
         $match: {
-          user: new mongoose.Types.ObjectId(userId),
+          user: new mongoose.Types.ObjectId(userId), ...(req.quotationScope?.createdByActor ? { createdByActor: req.quotationScope.createdByActor } : {}),
           $expr: {
             $and: [
               {

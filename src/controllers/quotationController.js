@@ -534,6 +534,9 @@ const createQuotation = async (req, res) => {
     quotation = await Quotation.create({
       _id: quotationId,
       user: req.user?.userId,
+      createdByActor: req.access?.actorId || String(req.user?.userId || ''),
+      createdByName: req.access?.name || '',
+      createdVia: req.user?.accessModule || 'QUOTATION_ERP',
       customerDetails,
       quotationDetails: {
         ...quotationDetails
@@ -580,6 +583,7 @@ const listQuotations = async (req, res) => {
     : (req.user?.userId || null);
 
   const filter = {};
+  if (req.quotationScope?.createdByActor) filter.createdByActor = req.quotationScope.createdByActor;
   if (targetUserId) {
     if (mongoose.Types.ObjectId.isValid(targetUserId)) {
       filter.user = new mongoose.Types.ObjectId(targetUserId);
@@ -853,6 +857,9 @@ const duplicateQuotationById = async (req, res) => {
     newQuotation = await Quotation.create({
       _id: newQuotationId,
       user: req.user?.userId,
+      createdByActor: req.access?.actorId || String(req.user?.userId || ''),
+      createdByName: req.access?.name || '',
+      createdVia: req.user?.accessModule || 'QUOTATION_ERP',
       customerDetails: hydratedQuotation.customerDetails || {},
       quotationDetails: {
         ...(hydratedQuotation.quotationDetails || {}),

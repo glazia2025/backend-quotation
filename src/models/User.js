@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
+  ...require('./businessMemberFields'),
+  isActive: { type: Boolean, default: true },
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   gstNumber: { type: String, required: true },
@@ -9,7 +11,6 @@ const userSchema = new mongoose.Schema({
   state: { type: String, required: true },
   address: { type: String, required: true },
   phoneNumber: { type: String, required: true, unique: true }, // This is the primary mobile number for login
-  phoneNumbers: { type: [String], default: [] }, // Additional login numbers (includes primary)
   paUrl: {type: String, required: false, default: null, unique: true},
   disabledModules: {
     type: [String],
@@ -43,7 +44,8 @@ const userSchema = new mongoose.Schema({
   }
 }, {timestamps: true });
 
-userSchema.index({ phoneNumbers: 1 }, { unique: true });
+
+userSchema.index({ 'members.phoneNumber': 1 }, { unique: true, partialFilterExpression: { 'members.phoneNumber': { $type: 'string' } } });
 
 const User = mongoose.model('User', userSchema);
 

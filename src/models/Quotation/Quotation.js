@@ -61,6 +61,9 @@ const quotationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+quotationSchema.add({ createdByActor: { type: String, index: true }, createdByName: String, createdVia: String });
+quotationSchema.index({ user: 1, createdByActor: 1, createdAt: -1 });
+
 quotationSchema.index({ user: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Quotation", quotationSchema);

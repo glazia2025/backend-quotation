@@ -16,12 +16,13 @@ for (const missingParent of [false, true]) {
     t.mock.method(QuotationItem, "find", () => assert.fail("Save must not read items back"));
     t.mock.method(QuotationItem, "deleteMany", async () => { deletedItems = true; });
     const loaded = Promise.resolve({ _id: quotationId, user: "owner" });
-    loaded.select = (fields) => { assert.equal(fields, "_id user"); return loaded; };
+    loaded.select = (fields) => { assert.equal(fields, "_id user quotationItems"); return loaded; };
     const updatedAt = new Date();
     const quotation = {
       findById: () => loaded,
-      findByIdAndUpdate: (id, update, options) => {
-        assert.equal(String(id), String(quotationId));
+      findOneAndUpdate: (filter, update, options) => {
+        assert.equal(String(filter._id), String(quotationId));
+        assert.equal(filter.quotationItems.length, 0);
         assert.ok(update.$push.quotationItems);
         assert.equal(update.$set, undefined);
         assert.equal(options.new, true);
@@ -37,6 +38,7 @@ for (const missingParent of [false, true]) {
         if (name === "../models/Quotation/Quotation") return quotation;
         if (name === "../models/Quotation/QuotationItem") return QuotationItem;
         if (name === "../utils/quotationItems") return quotationItems;
+        if (name === "../utils/quotationReferences") return require('./quotationReferences');
         if (name === "../utils/quotationImages") return {
           uploadQuotationImages: async ({ items }) => ({ items, uploadedKeys: ["uploaded-key"] }),
           deleteS3Keys: async () => { deletedImages = true; },
@@ -56,7 +58,7 @@ for (const missingParent of [false, true]) {
       params: { id: String(quotationId) }, user: { userId: "owner" },
       body: { item: { refCode: "W1", subItems: [{ id: "child", refCode: "W1-a" }] } },
     }, response);
-    assert.equal(response.code, missingParent ? 404 : 201);
+    assert.equal(response.code, missingParent ? 409 : 201);
     assert.equal(deletedItems, missingParent);
     assert.equal(deletedImages, missingParent);
     assert.equal(scheduled, !missingParent);
