@@ -2014,6 +2014,7 @@ const renderBomRows = (rows = [], emptyMessage = "No BOM items to show.") => {
             <td>${escapeHtml(`${row.system || "-"} - ${row.series || "-"}`)}</td>
              <td>${escapeHtml(row.itemCode)}</td>
             <td style="text-align:center;">${escapeHtml(row.quantity)}</td>
+            <td style="text-align:center;">pcs</td>
             <td style="text-align:right;">${currency(row.rate)}</td>
             <td style="text-align:center;">${escapeHtml(row.unit || "Piece")}</td>
             <td style="text-align:right;">${currency(row.amount)}</td>
@@ -2021,7 +2022,7 @@ const renderBomRows = (rows = [], emptyMessage = "No BOM items to show.") => {
         `
       )
       .join("")
-    : `<tr><td colspan="8" class="empty">${escapeHtml(emptyMessage)}</td></tr>`;
+    : `<tr><td colspan="9" class="empty">${escapeHtml(emptyMessage)}</td></tr>`;
 };
 
 const buildBomPdfHtml = (data) => {
@@ -2120,12 +2121,14 @@ const buildBomPdfHtml = (data) => {
           .products tbody td:nth-child(1),
           .products thead th:nth-child(5),
           .products tbody td:nth-child(5),
-          .products thead th:nth-child(7),
-          .products tbody td:nth-child(7) { text-align: center; }
           .products thead th:nth-child(6),
           .products tbody td:nth-child(6),
           .products thead th:nth-child(8),
-          .products tbody td:nth-child(8) { text-align: right; }
+          .products tbody td:nth-child(8) { text-align: center; }
+          .products thead th:nth-child(7),
+          .products tbody td:nth-child(7),
+          .products thead th:nth-child(9),
+          .products tbody td:nth-child(9) { text-align: right; }
           .products tbody td {
             font-size: 12px;
             padding: 8px 8px;
@@ -2225,6 +2228,7 @@ const buildBomPdfHtml = (data) => {
                 <th style="width: 15%;">Series</th>
                 <th style="width: 15%;">SAP Code</th>
                 <th style="width: 8%;">Qty.</th>
+                <th style="width: 7%;">Unit</th>
                 <th style="width: 12%;">Rate(₹)</th>
                 <th style="width: 8%;">Per</th>
                 <th style="width: 13%;">Amt. (₹)</th>
@@ -2233,12 +2237,13 @@ const buildBomPdfHtml = (data) => {
             <tbody>
               ${renderBomRows(profileRows, "No aluminium profiles to show.")}
               <tr class="subtotal-row">
-                <td></td>
-                <td colspan="3" style="font-weight: 700;">Aluminium Profiles Sub Total</td>
-                <td style="text-align: center; font-weight: 700;">${round3(profileQuantity)}</td>
-                <td></td>
-                <td></td>
-                <td style="text-align: right; font-weight: 700;">${currency(profileSubtotal)}</td>
+              <td></td>
+              <td colspan="3" style="font-weight: 700;">Aluminium Profiles Sub Total</td>
+              <td style="text-align: center; font-weight: 700;">${round3(profileQuantity)}</td>
+              <td style="text-align: center; font-weight: 700;">pcs</td>
+              <td></td>
+              <td></td>
+              <td style="text-align: right; font-weight: 700;">${currency(profileSubtotal)}</td>
               </tr>
             </tbody>
           </table>
@@ -2252,20 +2257,22 @@ const buildBomPdfHtml = (data) => {
                 <th style="width: 15%;">Series</th>
                 <th style="width: 15%;">SAP Code</th>
                 <th style="width: 8%;">Qty.</th>
-                <th style="width: 12%;">Rate(₹)</th>
-                <th style="width: 8%;">Per</th>
-                <th style="width: 13%;">Amt. (₹)</th>
+                  <th style="width: 7%;">Unit</th>
+                  <th style="width: 12%;">Rate(₹)</th>
+                  <th style="width: 8%;">Per</th>
+                  <th style="width: 13%;">Amt. (₹)</th>
               </tr>
             </thead>
             <tbody>
               ${renderBomRows(hardwareRows, "No hardware items to show.")}
               <tr class="subtotal-row">
-                <td></td>
-                <td colspan="3" style="font-weight: 700;">Hardware Sub Total</td>
-                <td style="text-align: center; font-weight: 700;">${round3(hardwareQuantity)}</td>
-                <td></td>
-                <td></td>
-                <td style="text-align: right; font-weight: 700;">${currency(hardwareSubtotal)}</td>
+              <td></td>
+              <td colspan="3" style="font-weight: 700;">Hardware Sub Total</td>
+              <td style="text-align: center; font-weight: 700;">${round3(hardwareQuantity)}</td>
+              <td style="text-align: center; font-weight: 700;">pcs</td>
+              <td></td>
+              <td></td>
+              <td style="text-align: right; font-weight: 700;">${currency(hardwareSubtotal)}</td>
               </tr>
             </tbody>
           </table>
